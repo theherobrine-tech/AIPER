@@ -31,6 +31,7 @@ router.post('/login', async (req, res) => {
         department: user.department,
         branch: user.branch,
         requiresPasswordChange: user.requiresPasswordChange,
+        lastBackupAt: user.lastBackupAt || null,
         token: generateToken(user._id),
       });
     } else {

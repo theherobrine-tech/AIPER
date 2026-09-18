@@ -7,6 +7,7 @@ const { protect, adminOrHead } = require('../middlewares/authMiddleware');
 const { authorize } = require('../middlewares/roleMiddleware');
 const Job = require('../models/Job');
 const TestInstance = require('../models/TestInstance');
+const User = require('../models/User');
 const { generateReport } = require('../services/reportGenerator');
 const { uploadCustomReport, downloadCustomReport, deleteCustomReport, getReportStatus } = require('../services/reportStorage');
 const { audit } = require('../utils/auditLogger');
@@ -281,8 +282,12 @@ router.get('/db-backup', protect, authorize('ADMIN', 'ADMIN_OFFICER', 'HEAD'), a
       backup[name] = await db.collection(name).find({}).toArray();
     }
 
+    // Stamp lastBackupAt on the requesting user
+    const backupTimestamp = new Date();
+    await User.findByIdAndUpdate(req.user._id, { lastBackupAt: backupTimestamp });
+
     // Build filename: FTL_LIMS_DD-MM-YYYY_ssmmHH.json
-    const now = new Date();
+    const now = backupTimestamp;
     const dd = String(now.getDate()).padStart(2, '0');
     const mm = String(now.getMonth() + 1).padStart(2, '0');
     const yyyy = now.getFullYear();
@@ -293,6 +298,7 @@ router.get('/db-backup', protect, authorize('ADMIN', 'ADMIN_OFFICER', 'HEAD'), a
 
     res.set('Content-Type', 'application/json');
     res.set('Content-Disposition', `attachment; filename="${filename}"`);
+    res.set('X-Backup-Timestamp', backupTimestamp.toISOString());
     // Use EJSON to correctly serialize ObjectIds, Dates, etc. (mirrors bson.json_util.dumps)
     res.send(EJSON.stringify(backup, null, 2));
   } catch (error) {

@@ -14,7 +14,11 @@ export default function DataSettings() {
   // Backup state machine: 'idle' | 'fetching' | 'animating' | 'done'
   const [backupPhase, setBackupPhase] = useState("idle");
   const [progress, setProgress] = useState(0);
-  const [lastBackup, setLastBackup] = useState(() => localStorage.getItem(BACKUP_STORAGE_KEY) || null);
+  const [lastBackup, setLastBackup] = useState(() => {
+    // Prefer DB-sourced value from user object, fall back to legacy localStorage key
+    const storedUser = JSON.parse(localStorage.getItem("user") || "null");
+    return storedUser?.lastBackupAt || localStorage.getItem(BACKUP_STORAGE_KEY) || null;
+  });
   const blobRef = useRef(null);
   const filenameRef = useRef("FTL_LIMS_backup.json");
 
@@ -82,6 +86,18 @@ export default function DataSettings() {
       const match = disposition.match(/filename="([^"]+)"/);
       filenameRef.current = match ? match[1] : "FTL_LIMS_backup.json";
       blobRef.current = new Blob([response.data]);
+
+      // Update lastBackupAt — from DB-stamped header, persisted into user object
+      const backupTs = response.headers["x-backup-timestamp"] || new Date().toISOString();
+      setLastBackup(backupTs);
+      // Persist into the stored user object so it survives re-login reads
+      const storedUser = JSON.parse(localStorage.getItem("user") || "null");
+      if (storedUser) {
+        storedUser.lastBackupAt = backupTs;
+        localStorage.setItem("user", JSON.stringify(storedUser));
+      }
+      // Legacy key for backward compat
+      localStorage.setItem(BACKUP_STORAGE_KEY, backupTs);
 
       // Data is ready — start the aesthetic progress animation
       setBackupPhase("animating");

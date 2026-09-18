@@ -11,6 +11,7 @@ const userSchema = new mongoose.Schema({
   password: { type: String, required: true },
   requiresPasswordChange: { type: Boolean, default: true },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  lastBackupAt: { type: Date, default: null },
 }, { timestamps: true });
 
 // Hash password before saving
