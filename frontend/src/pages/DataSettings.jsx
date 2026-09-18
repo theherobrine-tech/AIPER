@@ -3,6 +3,7 @@ import { Database, Settings, Hash, Download, ShieldCheck, Clock, CheckCircle } f
 import GroupSettings from "./Settings/GroupSettings";
 import SerialSettings from "./Settings/SerialSettings";
 import { formatDateTime } from "../utils/dateUtils";
+import API_URL from "../utils/api";
 import axios from "axios";
 
 const BACKUP_STORAGE_KEY = "ftl_last_backup_timestamp";
@@ -72,9 +73,7 @@ export default function DataSettings() {
     setBackupPhase("fetching");
     setProgress(0);
     try {
-      const token = JSON.parse(localStorage.getItem("user"))?.token;
-      const response = await axios.get("/api/export/db-backup", {
-        headers: { Authorization: `Bearer ${token}` },
+      const response = await axios.get(`${API_URL}/api/export/db-backup`, {
         responseType: "blob",
       });
 

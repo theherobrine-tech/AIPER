@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const mongoose = require('mongoose');
+const { EJSON } = require('bson');
 const { protect, adminOrHead } = require('../middlewares/authMiddleware');
 const { authorize } = require('../middlewares/roleMiddleware');
 const Job = require('../models/Job');
@@ -264,10 +265,10 @@ router.get('/report/:jobId/status', protect, async (req, res) => {
 /**
  * @desc    Export full database backup as JSON
  * @route   GET /api/export/db-backup
- * @access  Admin only
+ * @access  Admin, Admin Officer, Head
  * @returns Single JSON file: { collectionName: [documents...] }
  */
-router.get('/db-backup', protect, authorize('ADMIN'), async (req, res) => {
+router.get('/db-backup', protect, authorize('ADMIN', 'ADMIN_OFFICER', 'HEAD'), async (req, res) => {
   try {
     const db = mongoose.connection.db;
 
@@ -292,7 +293,8 @@ router.get('/db-backup', protect, authorize('ADMIN'), async (req, res) => {
 
     res.set('Content-Type', 'application/json');
     res.set('Content-Disposition', `attachment; filename="${filename}"`);
-    res.send(JSON.stringify(backup, null, 2));
+    // Use EJSON to correctly serialize ObjectIds, Dates, etc. (mirrors bson.json_util.dumps)
+    res.send(EJSON.stringify(backup, null, 2));
   } catch (error) {
     console.error('Error generating DB backup:', error);
     res.status(500).json({ message: 'Failed to generate backup', error: error.message });
