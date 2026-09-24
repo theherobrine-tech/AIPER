@@ -4,17 +4,17 @@
 
 ## Super-Phase Overview
 
-| SP | Name | Items | Goal |
+| SP | Name | Items | Status |
 |---|---|---|---|
-| SP1 | MVP Delivery | F1, B6, B5, F12, F5, F10, F4, F17, B2, B3 | Ship all platform-critical and client-visible features/bugs |
-| SP2 | Core Stability | F14, F13, B1, F8, F15, F2, F18, F19, F20, F9 | Eliminate remaining data integrity bugs, build the shared UI infrastructure (toasts, modals, error handling), Head Monitor tab (V1 + V2) |
-| SP3 | UX Polish + Infrastructure | F7, F3, F6, B4, B7, B8, B9, B10, C2, C3, C4, C5, C6 | UX improvements, performance chores, UI polish, and newly diagnosed prod bugs |
-| SP4 | Documentation | F11 | Full project documentation in `.agents/` |
-| SP5 | Future (Planned — No Start Date) | C1, C7 | DB schema revision, full UI revamp — only when explicitly planned |
+| SP1 | MVP Delivery | F1, B6, B5, F12, F5, F10, F4, F17, B2, B3 | ✅ Complete |
+| SP2 | Core Stability | F14, B1, F8, F15, F13, F2, F16, F18, F19, F20, F9 | ⬜ Active |
+| SP3 | UX Polish + Infrastructure | B4, B7, B8, B9, B10, F7, F3, F6, C2, C3, C4, C5, C6 | Upcoming |
+| SP4 | Documentation | F11 | Future |
+| SP5 | Future (No Start Date) | C1, C7 | Deferred |
 
 ---
 
-## SP1 — MVP Delivery
+## SP1 — MVP Delivery ✅
 
 ### Phase Order
 
@@ -32,9 +32,9 @@ Dependencies within SP1 dictate this sequence:
 | SP1.P5 | F5 | Accidental Approve Safeguard | ✅ Done |
 | SP1.P6 | F10 | Job Reassign Bug Fix | ✅ Done |
 | SP1.P7 | F12 | Report Minor Tweaks | ✅ Done |
-| SP1.P8 | F9 | New Addition of Special Group — Water 10500 | ~~Moved → SP2.P9~~ |
+| SP1.P8 | F9 | New Addition of Special Group — Water 10500 | ~~Moved → SP2.P11~~ |
 | SP1.P9 | F1 | Job Hold | ✅ Done |
-| SP1.P10 | F4 | Multi-Job Dispatch | ⬜ Next |
+| SP1.P10 | F4 | Multi-Job Dispatch | ✅ Done |
 | SP1.P11 | F17 | DB Export / Backup | ✅ Done |
 
 ---
@@ -54,6 +54,8 @@ Dependencies within SP1 dictate this sequence:
 | SP1.P1.5 | Test on mobile viewport — tap "Hand Over" and "Receive", confirm modal renders cleanly above all content |
 | SP1.P1.6 | Confirm "Confirm" button still triggers the correct transfer action |
 
+> ✅ Completed — commit `01f90f7`. Fix was CSS-only in `frontend/src/index.css` — stacking context/z-index fix on the overlay was sufficient. A React Portal was not needed.
+
 ---
 
 ### SP1.P2 — B2: Timeline State Mismatch on RETURNED
@@ -71,6 +73,8 @@ Dependencies within SP1 dictate this sequence:
 | SP1.P2.5 | Confirm `PENDING_HEAD_REVIEW` still renders s4 as `active` (clock icon) |
 | SP1.P2.6 | Visually verify the full timeline across: DISPATCHED, RETURNED, PENDING_HEAD_REVIEW, COMPLETED |
 
+> ✅ Completed — commits `bad3649` + `f54dc46` (two passes on `frontend/src/components/JobTimeline.jsx`). Second pass extended the fix to stages S2 and S3 as well, not just S4 as originally planned.
+
 ---
 
 ### SP1.P3 — B3: Deadline Lateness Indicator
@@ -85,6 +89,8 @@ Dependencies within SP1 dictate this sequence:
 | SP1.P3.4 | In `DispatcherPage.jsx`: on the deadline date/time inputs, add an `onChange` validation — if the composed datetime string is in the past, show an inline warning: "This deadline has already passed" |
 | SP1.P3.5 | Do NOT hard-block form submission for past deadlines (the head may intentionally set a tight deadline). Only warn. |
 | SP1.P3.6 | Verify on mobile — badge must not overflow the card |
+
+> ✅ Completed — commit `dc6a65c`. Overdue badge added to `AssistantDashboard.jsx`; past-deadline warning added to `DispatcherPage.jsx`. Note: `isOverdue()` was implemented inline in each file, not extracted as a shared util.
 
 ---
 
@@ -103,6 +109,8 @@ Dependencies within SP1 dictate this sequence:
 | SP1.P4.5 | Verify: create a NABL job, retain form, confirm ULR preview reads "ULR assigned upon completion" not a number |
 | SP1.P4.6 | Verify: create a Non-NABL opt-in job, retain form, confirm ULR section is reset cleanly |
 
+> ✅ Completed — commit `39e28d1`. ULR preview state cleared on form retain in `AdminOfficer/JobsPage.jsx`.
+
 ---
 
 ### SP1.P5 — F5: Accidental Approve Safeguard
@@ -117,6 +125,8 @@ Dependencies within SP1 dictate this sequence:
 | SP1.P5.4 | Ensure "Return to Officer" does NOT call any API — this is a pure frontend state revert |
 | SP1.P5.5 | Socket: no socket events needed — nothing has been committed to the backend |
 | SP1.P5.6 | Verify on mobile — the button must be tappable and not overlap the analyst picker dropdown |
+
+> ✅ Completed — commit `23b2a0f`. "Return to Officer" button added in `DispatcherPage.jsx` — pure frontend state revert, no API call.
 
 ---
 
@@ -134,6 +144,8 @@ Dependencies within SP1 dictate this sequence:
 | SP1.P6.6 | Frontend: verify that when analyst receives a reassigned job, previously saved values are visible in the input fields |
 | SP1.P6.7 | Test edge case: reassign a job that has zero saved progress — must still work cleanly |
 
+> ✅ Completed — commit `8fc39a4`. Fix applied to `backend/routes/tests/testResultRoutes.js` only. Reassign now updates `TestInstance` in-place; `results`/`method`/`notes` preserved; `reviewHistory` entry added.
+
 ---
 
 ### SP1.P7 — F12: Report Minor Tweaks
@@ -149,13 +161,15 @@ Dependencies within SP1 dictate this sequence:
 | SP1.P7.5 | Check if names are hardcoded strings or pulled from User model. If hardcoded, update `Monika Pali` → `Ms. Monika Pali` and `Jyoti Pathak` → `Ms. Jyoti Pathak`. If from DB, add a `honorific` field or derive from gender |
 | SP1.P7.6 | Generate a test report and visually verify both fixes match the reference doc |
 
+> ✅ Completed — commits `19e8034` + `393cfc1`. Both touch `backend/services/reportGenerator.js` only. Contact details split into two rows; `Ms.` prefix added to signatory names.
+
 ---
 
-### SP1.P8 — F9: New Addition of Special Group — Water 10500
+### SP1.P8 — F9: New Addition of Special Group — Water 10500 (Moved)
 
 **Files**: Backend parameter/group routes, Admin seed scripts, `reportGenerator.js`
 
-> Similar to the pesticides panel grouping. This adds the IS 10500:2012 drinking water standard as a special parameter group with its full set of chemical, physical, and microbiological parameters. Analysis work (structural diff, font audit, python-docx extraction of target report format) is preserved in `/temp/report/`.
+> Moved to SP2.P11. No code committed for this phase. Reference material in `/temp/report/`.
 
 ---
 
@@ -177,6 +191,8 @@ Dependencies within SP1 dictate this sequence:
 | SP1.P9.10 | **Analyst UI**: `AssistantDashboard.jsx` — listen for `job:held` socket event and remove the affected task card. When job is later unheld and re-dispatched, prior saved progress is visible |
 | SP1.P9.11 | **Test all stages**: hold a job at (a) officer stage, (b) head stage, (c) analyst stage. Verify correct recall behaviour at each |
 
+> ✅ Completed — commits `7914545` + `3db94f1` (two passes). Files: `Job.js`, `TestInstance.js`, `jobCrudRoutes.js`, `jobListRoutes.js`, `jobWorkflowRoutes.js`, `testAssignmentRoutes.js`, `JobsPage.jsx`, `JobLogTable.jsx`, `JobTimeline.jsx`. Second pass added the socket listeners on DispatcherPage and AssistantDashboard that were missing from the first pass.
+
 ---
 
 ### SP1.P10 — F4: Multi-Job Dispatch to Single Analyst
@@ -195,6 +211,8 @@ Dependencies within SP1 dictate this sequence:
 | SP1.P10.8 | Edge case: if one job in the bulk fails (e.g. already dispatched), report a partial failure without rolling back successful ones |
 | SP1.P10.9 | Verify on mobile — the bottom action bar must not obstruct the job list and must be easily dismissible |
 
+> ✅ Completed — commit `7f8bb8c`. Files: `testAssignmentRoutes.js` (+17 lines, bulk-dispatch endpoint) and `DispatcherPage.jsx` (+302 lines, multi-select UI). Note: the endpoint was added directly to `testAssignmentRoutes.js`, not as a separate route file.
+
 ---
 
 ### SP1.P11 — F17: DB Export / Backup
@@ -212,26 +230,26 @@ Dependencies within SP1 dictate this sequence:
 | SP1.P11.5 | **Authorization**: Route is `protect + authorize('ADMIN', 'ADMIN_OFFICER', 'HEAD')` |
 | SP1.P11.6 | **Timestamp persistence**: `lastBackupAt` stamped on the user document after each backup; returned in login response; displayed in the backup UI |
 
-> ✅ Completed. EJSON serialization, correct API base URL, per-user DB timestamp, and full animated UI implemented.
+> ✅ Completed — commits `95c7a93`, `719db4a`, `393cfc1`, `8a52077` (iterative fixes). Files: `exportRoutes.js`, `DataSettings.jsx`, `User.js`, `authRoutes.js`, `api.js`. EJSON serialization; per-user `lastBackupAt` timestamp in DB + login response; animated UI. URL base fix (`api.js`) was a separate follow-up commit.
 
 ---
 
-## SP2–SP4 Overview (Detail to be planned after SP1 is complete)
+## SP2 — Core Stability (Active)
 
 ### SP2 — Core Stability
-| Phase | ID | Title |
-|---|---|---|
-| SP2.P1 | F14 | Cross-Analyst Reassign Duplication Bug |
-| SP2.P2 | B1 | ULR Preview Staleness (Concurrent Jobs) |
-| SP2.P3 | F8 | Toast System Overhaul |
-| SP2.P4 | F15 | Global Modal Daemon |
-| SP2.P5 | F13 | Analyst Reassignment Tracking |
-| SP2.P6 | F2 | Head Pages — Search, Filter & Sort |
-| SP2.P7 | F16 | Hide Test Code Suffixes in UI |
-| SP2.P8 | F18 | Error Handling & Modal Overhaul (Bonus) |
-| SP2.P9 | F19 | Head Monitor Tab V1 — Cancel, Reassign & Live Progress |
-| SP2.P10 | F20 | Head Monitor Tab V2 — Param Split/Merge & Progress Snapshot |
-| SP2.P11 | F9 | New Addition of Special Group — Water 10500 |
+| Phase | ID | Title | Status |
+|---|---|---|---|
+| SP2.P1 | F14 | Cross-Analyst Reassign Duplication Bug | ⬜ Next |
+| SP2.P2 | B1 | ULR Preview Label Fix (Concurrent Jobs) | ⬜ Upcoming |
+| SP2.P3 | F8 | Toast System Overhaul | ⬜ Upcoming |
+| SP2.P4 | F15 | Global Modal Daemon | ⬜ Upcoming |
+| SP2.P5 | F13 | Analyst Reassignment History Tracking | ⬜ Upcoming |
+| SP2.P6 | F2 | Head Pages — Search, Filter & Sort | ⬜ Upcoming |
+| SP2.P7 | F16 | Hide Test Code Suffixes in UI | ⬜ Upcoming |
+| SP2.P8 | F18 | Error Handling & Modal Overhaul | ⬜ Upcoming |
+| SP2.P9 | F19 | Head Monitor Tab V1 — Cancel, Reassign & Live Progress | ⬜ Upcoming |
+| SP2.P10 | F20 | Head Monitor Tab V2 — Param Split/Merge & Progress Snapshot | ⬜ Upcoming |
+| SP2.P11 | F9 | New Addition of Special Group — Water 10500 | ⬜ Upcoming |
 
 ---
 
