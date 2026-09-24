@@ -75,7 +75,7 @@ router.get('/instances', protect, async (req, res) => {
 // Head dispatches tests to assistants
 router.post('/instances', protect, authorize('HEAD'), async (req, res) => {
   try {
-    const { jobId, deadline, assignments, blueprintId } = req.body;
+    const { jobId, deadline, assignments, blueprintId, bulkDispatch } = req.body;
 
     const job = await Job.findById(jobId);
     if (!job) return res.status(404).json({ message: 'Job not found' });
@@ -232,6 +232,7 @@ router.post('/instances', protect, authorize('HEAD'), async (req, res) => {
         heldInstance.status = 'PENDING';
         heldInstance.deadline = deadline;
         heldInstance.assignedTo = astId;
+        if (bulkDispatch) heldInstance.bulkDispatch = bulkDispatch;
 
         // Clear stale state from the previous cycle — the job went through a full
         // flow reset when held/unheld, so old reassignment history, retest constraints,
@@ -264,6 +265,7 @@ router.post('/instances', protect, authorize('HEAD'), async (req, res) => {
           assignedTo: astId,
           results: params,
           createdBy: req.user._id,
+          ...(bulkDispatch ? { bulkDispatch } : {}),
           ...(job.distribution[dept] && job.distribution[dept].reopenInfo && job.distribution[dept].reopenInfo.parentInstanceId ? {
             version: (job.distribution[dept].reopenInfo.parentVersion || 0) + 1,
             parentInstanceId: job.distribution[dept].reopenInfo.parentInstanceId
@@ -319,6 +321,19 @@ router.post('/instances', protect, authorize('HEAD'), async (req, res) => {
       message: `${dept.toUpperCase()} HEAD dispatched ${createdInstances.length} test(s) for job ${job.jobCode}`,
       target: { model: 'Job', documentId: jobId, identifier: job.jobCode }
     });
+
+    if (bulkDispatch?.bulkId) {
+      let assignedAnalystName = 'an analyst';
+      if (assistantIds.length > 0) {
+        const analystUser = await User.findById(assistantIds[0]);
+        if (analystUser) assignedAnalystName = analystUser.name;
+      }
+      audit('BULK_DISPATCHED', {
+        req,
+        message: `BULK dispatch — ${dept.toUpperCase()} HEAD dispatched ${bulkDispatch.totalJobsInBatch} jobs to analyst ${assignedAnalystName} (bulkId: ${bulkDispatch.bulkId}). Jobs: ${bulkDispatch.jobCodes.join(', ')}`,
+        target: { model: 'Job', documentId: jobId, identifier: job.jobCode }
+      });
+    }
 
     res.status(201).json({ message: 'Dispatched successfully', instances: createdInstances });
   } catch (err) {
