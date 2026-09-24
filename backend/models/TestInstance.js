@@ -51,7 +51,15 @@ const testInstanceSchema = new mongoose.Schema({
   version: { type: Number, default: 1 },
   parentInstanceId: { type: mongoose.Schema.Types.ObjectId, ref: 'TestInstance', default: null },
   reopenNote: { type: String },      // reason for reopening (set on the old instance)
-  reopenedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
+  reopenedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+
+  bulkDispatch: {
+    bulkId: { type: String, default: null },
+    dispatchedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    dispatchedAt: { type: Date, default: null },
+    totalJobsInBatch: { type: Number, default: null },
+    jobCodes: { type: [String], default: [] }
+  }
 }, { timestamps: true });
 
 module.exports = mongoose.model('TestInstance', testInstanceSchema);

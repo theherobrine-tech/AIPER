@@ -157,12 +157,12 @@ router.post('/:id/return', protect, authorize('HEAD'), async (req, res) => {
 });
 
 // Spawn a Child Retest Job (ADMIN_OFFICER only)
-router.post('/:id/retest', protect, authorize('AMIN_OFFIC'), async (req, res) => {
+router.post('/:id/retest', protect, authorize('ADMIN_OFFICER'), async (req, res) => {
   try {
     const parentJob = await Job.findById(req.params.id);
     if (!parentJob) return res.status(404).json({ message: 'Job not found' });
 
-    const rootJobId = parentJob.isRetest ? parob.parentJobId : parentJob._id;
+    const rootJobId = parentJob.isRetest ? parentJob.parentJobId : parentJob._id;
     if (!rootJobId) {
       console.error('RETEST ERROR: Missing rootJobId for parentJob', parentJob._id);
       return res.status(400).json({ message: 'Invalid job lineage: Missing parent ID' });

@@ -6,9 +6,9 @@
 
 | SP | Name | Items | Goal |
 |---|---|---|---|
-| SP1 | MVP Delivery | F1, B6, B5, F12, F5, F10, F4, F9, F17, B2, B3 | Ship all platform-critical and client-visible features/bugs |
-| SP2 | Core Stability | F14, F13, B1, F8, F15, F2, F18 | Eliminate remaining data integrity bugs, build the shared UI infrastructure (toasts, modals, error handling) |
-| SP3 | UX Polish + Infrastructure | F7, F3, F6, B4, B7, C2, C3, C4, C5, C6 | UX improvements, performance chores, UI polish |
+| SP1 | MVP Delivery | F1, B6, B5, F12, F5, F10, F4, F17, B2, B3 | Ship all platform-critical and client-visible features/bugs |
+| SP2 | Core Stability | F14, F13, B1, F8, F15, F2, F18, F19, F20, F9 | Eliminate remaining data integrity bugs, build the shared UI infrastructure (toasts, modals, error handling), Head Monitor tab (V1 + V2) |
+| SP3 | UX Polish + Infrastructure | F7, F3, F6, B4, B7, B8, B9, B10, C2, C3, C4, C5, C6 | UX improvements, performance chores, UI polish, and newly diagnosed prod bugs |
 | SP4 | Documentation | F11 | Full project documentation in `.agents/` |
 | SP5 | Future (Planned — No Start Date) | C1, C7 | DB schema revision, full UI revamp — only when explicitly planned |
 
@@ -32,10 +32,10 @@ Dependencies within SP1 dictate this sequence:
 | SP1.P5 | F5 | Accidental Approve Safeguard | ✅ Done |
 | SP1.P6 | F10 | Job Reassign Bug Fix | ✅ Done |
 | SP1.P7 | F12 | Report Minor Tweaks | ✅ Done |
-| SP1.P8 | F9 | New Addition of Special Group — Water 10500 | ⬜ Planned |
+| SP1.P8 | F9 | New Addition of Special Group — Water 10500 | ~~Moved → SP2.P9~~ |
 | SP1.P9 | F1 | Job Hold | ✅ Done |
 | SP1.P10 | F4 | Multi-Job Dispatch | ⬜ Next |
-| SP1.P11 | F17 | DB Export / Backup | ⬜ Planned |
+| SP1.P11 | F17 | DB Export / Backup | ✅ Done |
 
 ---
 
@@ -206,12 +206,13 @@ Dependencies within SP1 dictate this sequence:
 | Subphase | Task |
 |---|---|
 | SP1.P11.1 | **Backend route**: Create `GET /api/admin/export` (admin-only). Use `mongoose.connection.db.listCollections()` to enumerate all collections, then `find({})` on each to dump all documents |
-| SP1.P11.2 | **Format**: Output as a single `.json` file containing `{ collectionName: [documents...], ... }` for all collections. Stream the response with `Content-Disposition: attachment` header |
-| SP1.P11.3 | **Filename**: Auto-generate as `aiper_backup_YYYY-MM-DD_HHmmss.json` |
-| SP1.P11.4 | **Frontend button**: Add an "Export Database" button on the Admin dashboard. On click, trigger a download via the export endpoint |
-| SP1.P11.5 | **Loading state**: Show a spinner/progress indicator while the export is being prepared (large DBs may take a few seconds) |
-| SP1.P11.6 | **Authorization**: Ensure the route is strictly `protect + authorize('ADMIN')` |
-| SP1.P11.7 | **Test**: Export from `local_db`, verify all collections are present and documents match count |
+| SP1.P11.2 | **Format**: Output as a single `.json` file using `EJSON.stringify` (preserves ObjectIds and Dates). Send with `Content-Disposition: attachment` header |
+| SP1.P11.3 | **Filename**: Auto-generate as `FTL_LIMS_DD-MM-YYYY_ssmmHH.json` |
+| SP1.P11.4 | **Frontend**: `Backup & Export` tab in `DataSettings.jsx`. Full-width animated progress bar (aesthetic), last-backup timestamp per user stored in DB (`User.lastBackupAt`), auto-fadeout after 5s |
+| SP1.P11.5 | **Authorization**: Route is `protect + authorize('ADMIN', 'ADMIN_OFFICER', 'HEAD')` |
+| SP1.P11.6 | **Timestamp persistence**: `lastBackupAt` stamped on the user document after each backup; returned in login response; displayed in the backup UI |
+
+> ✅ Completed. EJSON serialization, correct API base URL, per-user DB timestamp, and full animated UI implemented.
 
 ---
 
@@ -228,20 +229,251 @@ Dependencies within SP1 dictate this sequence:
 | SP2.P6 | F2 | Head Pages — Search, Filter & Sort |
 | SP2.P7 | F16 | Hide Test Code Suffixes in UI |
 | SP2.P8 | F18 | Error Handling & Modal Overhaul (Bonus) |
+| SP2.P9 | F19 | Head Monitor Tab V1 — Cancel, Reassign & Live Progress |
+| SP2.P10 | F20 | Head Monitor Tab V2 — Param Split/Merge & Progress Snapshot |
+| SP2.P11 | F9 | New Addition of Special Group — Water 10500 |
+
+---
+
+### SP2.P9 — F19: Head Monitor Tab V1 — Cancel, Reassign & Live Progress
+
+**What it is:** A new **Monitor** tab on the Head dashboard that covers the intermediate state between Dispatch and Review. Once a job is dispatched, it lives here until the analyst submits it for review.
+
+**Workflow position:**
+```
+Dispatch ──→ Monitor ──→ Review ─→ Done
+            ↑____________|
+       (cancel → re-dispatch)
+```
+
+**Actions available on each Monitor card:**
+- **Cancel** — pulls the job back to the Dispatch queue. No re-approval needed. Head re-dispatches directly to any analyst.
+- **Reassign** — swaps the entire job mid-flight to a different analyst. No cancel required.
+
+**Data behaviour on Cancel or Reassign:**
+- All of the previous analyst's saved results carry over to the new assignment.
+- `isSaved` is reset to `false` on every carried-over param.
+- The new analyst sees pre-filled values but **cannot submit** until they have explicitly re-saved every param (Submit button stays locked).
+- The `TestInstance` is updated in-place: `assignedTo` changes, `results` carry over with `isSaved: false`, a `MONITOR_REASSIGN` or `MONITOR_CANCEL_REDISPATCH` entry is added to `reviewHistory`.
+- A socket event removes the task from the old analyst's dashboard and delivers it to the new one.
+
+**Progress view (per-param ticks):**
+- Each Monitor card shows a per-param indicator: 🟢 saved / ⚪ not yet saved.
+- Updates in real-time via socket whenever the analyst saves a param (`PARAM_SAVED` event).
+- Head does NOT see the actual values — only completion status per param.
+
+| Subphase | Task |
+|---|---|
+| SP2.P9.1 | **Backend — fetch route**: `GET /api/jobs/monitoring` (Head-scoped) — returns all jobs with status `DISPATCHED` or `PENDING_HEAD_REVIEW` for the head's department, populated with `TestInstance` data (assignedTo name, results `isSaved` array) |
+| SP2.P9.2 | **Backend — cancel route**: `POST /api/jobs/:id/monitor-cancel` — resets job status to `APPROVED` (dispatch queue), sets `TestInstance.status` to `CANCELLED`, preserves all results data on the instance. Emits `job:monitor-cancelled` socket event |
+| SP2.P9.3 | **Backend — reassign route**: `PUT /api/jobs/:id/monitor-reassign` with `{ newAnalystId }` — updates `TestInstance.assignedTo`, resets all `result.isSaved` to `false`, adds `reviewHistory` entry, emits `job:monitor-reassigned` |
+| SP2.P9.4 | **Frontend — Monitor tab**: Add "Monitor" tab to Head dashboard between Dispatcher and Review Queue. Fetch via the monitoring route on mount |
+| SP2.P9.5 | **Frontend — Monitor card**: Show job code, sample name, NABL badge, deadline indicator, analyst name, and per-param save ticks (🟢/⚪) |
+| SP2.P9.6 | **Frontend — Cancel action**: Confirmation modal — "Cancel and return to dispatch? Analyst's saved progress will be preserved for the next assignment." On confirm, call monitor-cancel route; remove card from Monitor, job reappears in Dispatcher |
+| SP2.P9.7 | **Frontend — Reassign action**: Inline analyst picker (same department). Confirmation: "Reassign [job code] from [Analyst A] to [Analyst B]? Saved progress will carry over but analyst B must re-save all params before submitting." On confirm, call monitor-reassign route |
+| SP2.P9.8 | **Socket — analyst side**: `job:monitor-cancelled` — remove task card from old analyst's dashboard. `job:monitor-reassigned` — remove from old analyst, add to new analyst with pre-filled (but locked) results |
+| SP2.P9.9 | **Socket — head side**: Listen for `PARAM_SAVED` events (emitted when analyst saves a param) — update the per-param tick on the corresponding Monitor card in real-time |
+| SP2.P9.10 | **Analyst — pre-filled lock**: On a reassigned/re-dispatched task, pre-fill result values from carried-over data but set all `isSaved: false`. Submit button disabled until all params are re-saved. Display a subtle banner: "Results pre-filled from previous assignment — please review and save each parameter." |
+| SP2.P9.11 | Verify on mobile — Monitor cards scroll cleanly, per-param ticks readable, Cancel/Reassign modals don't overflow |
+
+---
+
+### SP2.P10 — F20: Head Monitor Tab V2 — Param Split/Merge & Progress Snapshot
+
+**What it adds on top of V1:** Advanced job manipulation from within the Monitor tab.
+
+**Features:**
+- **Param split** — Head moves specific params from analyst A's instance to analyst B (who already has an active instance). Instead of reassigning the whole job, only selected params migrate. Directly prevents the B10 duplicate-instance bug for future cases.
+- **Param merge** — If two analysts both have instances for the same job, head can consolidate params from one into the other.
+- **Progress snapshot** — On card expand, show a param-by-param breakdown including: param name, analyst assigned, save status, and (optionally) the method used — but NOT the result values.
+
+**Data behaviour (same rules as V1):**
+- Moved params carry over with `isSaved: false` on the receiving analyst's instance.
+- Receiving analyst must re-save moved params before submitting.
+- Source analyst's instance: moved params are cleared (`value: ''`, `isSaved: false`) to prevent the Approved bleed-through seen in B10.
+
+| Subphase | Task |
+|---|---|
+| SP2.P10.1 | **Backend — split route**: `PUT /api/jobs/:id/monitor-split` with `{ fromAnalystId, toAnalystId, paramIds }` — removes `paramIds` from source `TestInstance`, injects them (blank, `isSaved: false`) into target `TestInstance` (or creates new if target has no instance). Updates both instances' `retestOnly` if applicable |
+| SP2.P10.2 | **Frontend — split UI**: In Monitor card expand view, each param row shows which analyst has it + a "Move" button. Clicking opens an analyst picker for the target analyst |
+| SP2.P10.3 | **Frontend — progress snapshot**: Expanded card view shows param-level breakdown: param name, assigned analyst, save tick, method name (if saved). No result values exposed to head |
+| SP2.P10.4 | **Socket**: Emit `instance:params-split` — source analyst's task card removes moved params, target analyst's task card gains new params (pre-filled, locked) |
+| SP2.P10.5 | Test: split 1 param from analyst A to analyst B who already has an active instance — verify no new TestInstance created, B10 scenario cannot recur |
+| SP2.P10.6 | Test: split to an analyst with no existing instance — verify new instance IS created |
+| SP2.P10.7 | Verify progress snapshot shows correct per-param data after a split |
 
 ### SP3 — UX Polish + Infrastructure
 | Phase | ID | Title |
 |---|---|---|
 | SP3.P1 | B4 | Analyst Task Modal Visibility (Narrow) |
 | SP3.P2 | B7 | Cancellation Modal Sentence Rework |
-| SP3.P3 | C2 | Clean Up `/temp` |
-| SP3.P4 | C3 | HTTP Compression Middleware |
-| SP3.P5 | C4 | MongoDB Connection Pool Tuning |
-| SP3.P6 | C5 | Scope 50mb JSON Body Limit |
-| SP3.P7 | C6 | Socket.IO Auth Scope |
-| SP3.P8 | F7 | Dashboard History Revamp |
-| SP3.P9 | F3 | Transfer List Rework |
-| SP3.P10 | F6 | Job Grouping in Officer's Page |
+| SP3.P3 | **B8** | **Retest Route Auth Typo (Prod Blocker)** | ✅ Done |
+| SP3.P4 | **B9** | **Job Edit Wipes Parameters on Completed-Chemical Jobs** |
+| SP3.P5 | **B10** | **Selective Reassign Creates Duplicate TestInstance** |
+| SP3.P6 | C2 | Clean Up `/temp` |
+| SP3.P7 | C3 | HTTP Compression Middleware |
+| SP3.P8 | C4 | MongoDB Connection Pool Tuning |
+| SP3.P9 | C5 | Scope 50mb JSON Body Limit |
+| SP3.P10 | C6 | Socket.IO Auth Scope |
+| SP3.P11 | F7 | Dashboard History Revamp |
+| SP3.P12 | F3 | Transfer List Rework |
+| SP3.P13 | F6 | Job Grouping in Officer's Page |
+
+---
+
+### SP3.P3 — B8: Retest Route Auth Typo (Prod Blocker)
+
+**File**: `backend/routes/jobs/jobWorkflowRoutes.js` (lines 160, 165)
+
+**Affected roles**: ADMIN_OFFICER (completely blocked from creating retest jobs)
+
+**Symptom (Image 1)**: Officer opens a returned job, fills in the retest form, clicks submit. A browser `alert()` fires: `"Error saving job: User role ADMIN_OFFICER is not authorized to access this route"`. The button shows `Processing...` and never resolves. This is NOT a token/session expiry issue — the token is valid, the role check itself is wrong.
+
+**Root cause — two typos on the same route:**
+
+Typo 1 — Auth guard (`jobWorkflowRoutes.js:160`):
+```js
+// BROKEN (current):
+router.post('/:id/retest', protect, authorize('AMIN_OFFIC'), async (req, res) => {
+// CORRECT:
+router.post('/:id/retest', protect, authorize('ADMIN_OFFICER'), async (req, res) => {
+```
+`roleMiddleware.js` does `roles.includes(req.user.role)`. `'ADMIN_OFFICER'` is not in `['AMIN_OFFIC']`, so it always returns 403. The frontend's `handleSubmit` catch block (JobsPage.jsx:811–814) catches this HTTP 403 and shows it via `alert()`.
+
+Typo 2 — Variable name crash (`jobWorkflowRoutes.js:165`):
+```js
+// BROKEN (current):
+const rootJobId = parentJob.isRetest ? parob.parentJobId : parentJob._id;
+// CORRECT:
+const rootJobId = parentJob.isRetest ? parentJob.parentJobId : parentJob._id;
+```
+`parob` is not defined anywhere — this would throw a `ReferenceError` and return a 500 even if the auth typo were fixed and the job IS a retest (second-generation retest). The route would silently fail on any retest-of-retest scenario.
+
+**Flow context**: The retest form in `JobsPage.jsx` calls the route via `reopenParentId` state (line 761–764). It sends the full job payload (customer, sample, compliance, parameters) to `POST /api/jobs/:parentId/retest`. The route creates a child Job document with `isRetest: true` + `parentJobId` linking back to the root, then marks parent instances as `REOPENED`.
+
+**Why it wasn't caught locally**: The developer likely tested with an ADMIN account (which has broader access) or the route was written with a placeholder role string that was never corrected. The `authorize` middleware just does a string match — no compile-time check.
+
+| Subphase | Task |
+|---|---|
+| SP3.P3.1 | `jobWorkflowRoutes.js` line 160: change `authorize('AMIN_OFFIC')` → `authorize('ADMIN_OFFICER')` | ✅ |
+| SP3.P3.2 | `jobWorkflowRoutes.js` line 165: change `parob.parentJobId` → `parentJob.parentJobId` | ✅ |
+| SP3.P3.3 | Verify locally: log in as ADMIN_OFFICER, open a completed job, trigger retest — confirm 201 response and new job appears in the list |
+| SP3.P3.4 | Verify a retest-of-retest (chain): create retest → complete it → create another retest from it → confirm `rootJobId` resolves correctly via `parentJob.parentJobId` |
+| SP3.P3.5 | Deploy to prod (`aitr-ftl-backend-lims.up.railway.app`) and confirm with the officer |
+
+---
+
+### SP3.P4 — B9: Job Edit Wipes Parameters on Completed-Chemical Jobs
+
+**Files**: `frontend/src/pages/AdminOfficer/JobsPage.jsx` (primary), `backend/routes/jobs/jobCrudRoutes.js:795`
+
+**Affected roles**: ADMIN_OFFICER
+
+**Symptom (Image 2)**: Officer opens job `2608251742` (created 2026-08-25) in edit mode. The "Test Parameters" section shows `-- Add Group --` with no parameters listed — as if the job has 0 parameters. The ULR field `TC-124342600000243` is visible, meaning the job loaded fine, but the parameter selector hydration failed silently.
+
+**Context — what the micro head did**: The micro head dispatched something for this job (user reported this). The job's DB state at time of bug:
+- `jobCode: 2608251742` (NABL, 7 chemical params) + sibling `2608251742-N` (Non-NABL, 2 params)
+- `chemical.status: COMPLETED`, `micro.required: false`, `micro.status: PENDING`
+- Chemical test instances: `2608251742-2a` (Ajay, 2 params, COMPLETED, had 1 REASSIGN + APPROVE), `2608251742-2b` (Om Prakash, 3 params, COMPLETED), `2608251742-2c` (Diksha, 2 params, COMPLETED)
+- The job edit form is accessible because `micro` is not done — the immutability guard (`isMicroDone && isChemicalDone`) only blocks if BOTH are done
+
+**Root cause — populated parameterId shape mismatch:**
+
+The `GET /api/jobs/:id` route (`jobCrudRoutes.js:795`) populates `parameters.parameterId`:
+```js
+const job = await Job.findById(req.params.id)
+  .populate('parameters.parameterId', 'name unit type _id');
+```
+This means `job.parameters[i].parameterId` in the API response is an **object** `{ _id, name, type, unit }`, NOT a plain string ID.
+
+The `JobsPage.jsx` hydration `useEffect` (triggered when `editingJobId` is set) reads `job.parameters` and builds `selectedParams`. If the hydration code does something like:
+```js
+setSelectedParams(job.parameters.map(p => ({ ...p, _id: p.parameterId })))
+```
+...it sets `_id` to the full nested object. The `CascadingParameterSelector` then tries to match `p._id` or `p.parameterId` against its own parameter list (which uses plain string IDs), finds no matches, and renders nothing selected.
+
+**Why it's intermittent / only on this job**: The bug likely affects ALL jobs opened for editing, but it's only reported now because this job is in a state where editing is still unlocked (micro pending) yet chemical is complete — which is unusual. Most edits happen before any department completes, where the user may not notice the hydration failure because they just re-select everything.
+
+| Subphase | Task |
+|---|---|
+| SP3.P4.1 | In `JobsPage.jsx`, find the `useEffect` / `handleEditJob` function that sets `selectedParams`, `editingJobId`, etc. when the officer clicks "Edit" on a job card. Read the exact mapping from `job.parameters` → `selectedParams` |
+| SP3.P4.2 | Identify whether `parameterId` is read as a plain string or as an object. Add defensive extraction: `const id = typeof p.parameterId === 'object' ? p.parameterId._id : p.parameterId` |
+| SP3.P4.3 | Also extract `name`, `type`, `unit`, `specification` from the nested object when `parameterId` is populated: `const name = p.name || p.parameterId?.name || ''` |
+| SP3.P4.4 | Ensure the hydrated array elements match the shape `CascadingParameterSelector` expects for `initialSelectedParams` — cross-check with `CascadingParameterSelector.jsx` line 24 (`useState(initialSelectedParams)`) |
+| SP3.P4.5 | Handle both shapes (object and plain string) for backward compatibility with any cached/older data |
+| SP3.P4.6 | Test on a fresh local job: create → dispatch → open edit → confirm parameters show selected |
+| SP3.P4.7 | Test on prod job `2608251742` (`_id: 6a8d7c7d386517f8a79e4758`): open edit, confirm all 7 parameters (Moisture, Total Ash on Dry Basis, Ash Insoluble in dilute HCl, Presence of Chromate, Curcumin content, Volatile Oil Content, Starch Content) show as selected |
+
+---
+
+### SP3.P5 — B10: Selective Reassign Creates Duplicate TestInstance
+
+**File**: `backend/routes/tests/testResultRoutes.js` (lines 208–297)
+
+**Affected roles**: HEAD (triggers it), ASSISTANT/analyst (sees the effect)
+
+**Symptoms (Images 3 & 4)**:
+- Image 3 (Analyst A — Diksha's dashboard): Shows `Test Parameters (2)` with "Acidity inorganic" as an active retest field AND "Total Ash" marked `✓ Approved`. The approved value bleeds through even though it was meant to go to another analyst for retesting.
+- Image 4 (Analyst B — appears to be another analyst's dashboard): Shows **two separate cards** for the same job — `Job 2607281695` and `Job 2607281695-2b-Rzua7`, both `Pending`, both dated `27/8/2026`. This is impossible by design — one job should only produce one instance per analyst per department.
+
+**Exact DB state confirmed (local DB, job `2607281695`, `_id: 6a68856dc14ac530032fc240`):**
+
+| testCode | status | assignedTo | paramCount | retestOnly | parentInstanceId | reviewHistory |
+|---|---|---|---|---|---|---|
+| `2607281695-2a` | PENDING | Diksha Dwivedi | 2 | `[density_id, water_id]` | null | [REASSIGN] |
+| `2607281695-2b` | PENDING | Vishal Deshmukh | 2 | `[acidity_id]` | null | [REASSIGN] |
+| `2607281695-2b-Rzua7` | PENDING | Diksha Dwivedi | 1 | `[total_ash_id]` | → points to `-2b` | [] |
+
+Job has `chemical.status: ASSIGNED_TO_ASSISTANT`. Param IDs:
+- `Density at 15°c` → `6a6875afc14ac530032fc23a`
+- `Water Content (soluble water)` → `6a687649c14ac530032fc23c`
+- `Acidity inorganic` → `6a687698c14ac530032fc23d`
+- `Total Ash` → `6a75bd07c14ac53003339880`
+
+**Full flow trace that caused the bug:**
+
+1. HEAD (Monika Pali) dispatched 4 chemical params to 2 analysts: Diksha got `2607281695-2a` (2 params: Density, Water Content), Vishal got `2607281695-2b` (2 params: Acidity, Total Ash).
+2. Vishal submitted `2607281695-2b` → status: `PENDING_HEAD_REVIEW`.
+3. HEAD reviewed and chose **selective REASSIGN** with `selectedParams`:
+   - Acidity inorganic → reassign back to Vishal (original analyst)
+   - Total Ash → reassign to Diksha (different analyst)
+4. This entered the **complex multi-analyst REASSIGN branch** in `testResultRoutes.js:208`.
+5. For Vishal (original analyst): `retestOnly = [acidity_id]`, results updated, status → PENDING. ✅ Correct.
+6. For Diksha (different analyst, line ~253): the code runs:
+   ```js
+   const subInstance = new TestInstance({
+     testCode: `${instance.testCode}-R${Date.now().toString(36).slice(-4)}`, // → '2607281695-2b-Rzua7'
+     assignedTo: diksha_id,
+     results: [{ total_ash_param, value: '', isSaved: false }],
+     retestOnly: [total_ash_id],
+     parentInstanceId: instance._id  // links to -2b
+   });
+   await subInstance.save();
+   ```
+   **The code never checks if Diksha already has `2607281695-2a` active.** It unconditionally spawns a new instance. Now Diksha has TWO: `2607281695-2a` (her original 2 params) and `2607281695-2b-Rzua7` (the new 1 param).
+
+**The "Approved" bleed-through (Image 3):**
+
+`2607281695-2b`'s `results` array was saved with `Total Ash` having `isSaved: true` and a real value (from Vishal's original submission). When the selective reassign marks `retestOnly = [acidity_id]` on this instance, the frontend (`AssistantDashboard.jsx`) renders params: if `retestOnly` is non-empty, params NOT in `retestOnly` are shown as `✓ Approved` using their existing `isSaved + value`. Since Total Ash (`total_ash_id`) is NOT in `retestOnly` on instance `-2b`, it shows as Approved — even though the HEAD intended it to go to Diksha. The Head's intent and the instance data are now desynchronised.
+
+**The correct fix** — two changes in `testResultRoutes.js`:
+
+1. **Prevent duplicate creation**: Before `new TestInstance(...)` for a non-original analyst, check for an existing active instance for that analyst+job+dept. If found, UPDATE it instead of creating new.
+2. **Fix result bleed**: When removing params from the original instance (sending them to another analyst), also clear those param values from the original instance's results (`value: '', isSaved: false`) so they don't show as Approved.
+
+**Data fix needed (local DB)**: Cancel `2607281695-2b-Rzua7` (orphan) and merge its `Total Ash` param into `2607281695-2a`'s `retestOnly` + `results`.
+
+| Subphase | Task |
+|---|---|
+| SP3.P5.1 | Read `testResultRoutes.js` lines 208–297 (the full complex REASSIGN branch) before touching anything |
+| SP3.P5.2 | In the `for (const [analystId, paramIds] of Object.entries(byAnalyst))` loop (line ~254), before `new TestInstance(...)`, add: `const existingInstance = await TestInstance.findOne({ jobId: instance.jobId, assignedTo: analystId, department: instance.department, status: { $in: ['PENDING', 'PENDING_HEAD_REVIEW'] } })` |
+| SP3.P5.3 | If `existingInstance` found: push new `paramIds` into `existingInstance.retestOnly` (deduped), inject blank `results` entries for params not already present, keep status `PENDING`, save. Skip `new TestInstance`. |
+| SP3.P5.4 | If no `existingInstance`: proceed with `new TestInstance(...)` as before (unchanged code path) |
+| SP3.P5.5 | Fix Approved bleed: in the original-analyst branch (lines ~211–234) AND in the "no params for original" branch (lines ~240–251), when removing params that go to other analysts, clear those params from `instance.results`: `value: ''`, `isSaved: false`, `testMethod: ''` — so the frontend stops rendering them as Approved |
+| SP3.P5.6 | One-off data fix on local DB: set `2607281695-2b-Rzua7` status → `CANCELLED`; add `total_ash_id` to `2607281695-2a.retestOnly`; inject blank Total Ash entry into `2607281695-2a.results` if not present. Write this as a script in `/temp/` |
+| SP3.P5.7 | Test: dispatch job to 2 analysts → one submits → HEAD selective-reassigns 1 param to the OTHER analyst who already has an active instance → verify only 1 instance per analyst exists, no new testCode created |
+| SP3.P5.8 | Test: selective-reassign to a brand-new analyst (not previously dispatched to) → verify new instance IS created (this path must still work) |
+| SP3.P5.9 | Test Approved display: after partial reassign, the retained params on the original instance must show as Approved only if they were genuinely approved (not if they were just submitted) |
 
 ### SP4 — Documentation
 | Phase | ID | Title |
