@@ -282,6 +282,42 @@ tr:hover {
   }
 }
 
+/* ── Sidebar offset for fixed bottom bars ── */
+:root {
+  --bulk-bar-sidebar-offset: 260px; /* desktop sidebar width */
+}
+
+@media (max-width: 768px) {
+  :root {
+    --bulk-bar-sidebar-offset: 0px; /* sidebar is off-canvas on mobile */
+  }
+}
+
+/* ── Bulk Action Bar animations ── */
+@keyframes slideDown {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+}
+
+.bulk-action-bar {
+  pointer-events: auto;
+}
+
+.bulk-bar-in {
+  animation: slideUp 0.28s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.bulk-bar-out {
+  animation: slideDown 0.25s cubic-bezier(0.4, 0, 0.2, 1) both;
+  pointer-events: none;
+}
+
 @keyframes formReveal {
   0% {
     opacity: 0;

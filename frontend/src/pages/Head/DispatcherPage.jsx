@@ -43,11 +43,30 @@ export default function Dispatcher() {
 
   // Bulk dispatch state
   const [selectedJobIds, setSelectedJobIds] = useState(new Set());
+  const [bulkBarVisible, setBulkBarVisible] = useState(false);
   const [bulkAnalystId, setBulkAnalystId] = useState("");
   const [bulkDeadlineDate, setBulkDeadlineDate] = useState("");
   const [bulkDeadlineTime, setBulkDeadlineTime] = useState("");
   const [isBulkConfirmOpen, setIsBulkConfirmOpen] = useState(false);
   const [isBulkDispatching, setIsBulkDispatching] = useState(false);
+
+  // Format deadline for display in confirm modal (no external dep)
+  const formatBulkDeadline = (date, time) => {
+    if (!date || !time) return "";
+    const d = new Date(`${date}T${time}`);
+    return d.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  };
+
+  // Slide the bar out, then clear selection after animation
+  const dismissBulkBar = () => {
+    setBulkBarVisible(false);
+    setTimeout(() => {
+      setSelectedJobIds(new Set());
+      setBulkAnalystId("");
+      setBulkDeadlineDate("");
+      setBulkDeadlineTime("");
+    }, 280);
+  };
 
   // Return Job State
   const [returnModalData, setReturnModalData] = useState(null); // { jobId: string, dept: string }
@@ -295,6 +314,9 @@ export default function Dispatcher() {
         next.add(jobId);
         setExpandedJobId((prevExpanded) => (prevExpanded === jobId ? null : prevExpanded));
       }
+      // Show bar when >= 2 selected, hide when < 2
+      if (next.size >= 2) setBulkBarVisible(true);
+      else setBulkBarVisible(false);
       return next;
     });
   };
@@ -358,10 +380,15 @@ export default function Dispatcher() {
       }
     }
 
+    // Slide bar out after dispatch
+    setBulkBarVisible(false);
     setIsBulkDispatching(false);
-    setBulkAnalystId("");
-    setBulkDeadlineDate("");
-    setBulkDeadlineTime("");
+    setTimeout(() => {
+      setSelectedJobIds(new Set());
+      setBulkAnalystId("");
+      setBulkDeadlineDate("");
+      setBulkDeadlineTime("");
+    }, 280);
 
     if (successCount > 0) {
       setSuccess(`${successCount} job${successCount !== 1 ? "s" : ""} dispatched to ${analystName}`);
@@ -491,24 +518,35 @@ export default function Dispatcher() {
                         toggleJobSelection(job._id);
                       }}
                       style={{
-                        padding: "0.5rem",
+                        width: "26px",
+                        height: "26px",
+                        minWidth: "26px",
+                        borderRadius: "6px",
+                        border: selectedJobIds.has(job._id)
+                          ? "2px solid var(--color-primary)"
+                          : "2px solid var(--color-border)",
+                        backgroundColor: selectedJobIds.has(job._id)
+                          ? "var(--color-primary)"
+                          : "var(--color-surface)",
                         cursor: "pointer",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
+                        transition: "all 0.15s ease",
+                        flexShrink: 0,
                       }}
                     >
-                      <input
-                        type="checkbox"
-                        checked={selectedJobIds.has(job._id)}
-                        readOnly
-                        style={{
-                          width: "24px",
-                          height: "24px",
-                          cursor: "pointer",
-                          accentColor: "var(--color-primary)",
-                        }}
-                      />
+                      {selectedJobIds.has(job._id) && (
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                          <path
+                            d="M2 7L5.5 10.5L12 3.5"
+                            stroke="white"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      )}
                     </div>
                     <div
                       style={{
@@ -1286,60 +1324,86 @@ export default function Dispatcher() {
         <JobDetailsModal job={detailsJob} onClose={() => setDetailsJob(null)} />
       )}
 
-      {selectedJobIds.size >= 2 && (
+      {/* ── Bulk Action Bar ── */}
+      {(selectedJobIds.size >= 2 || bulkBarVisible) && (
         <div
           style={{
             position: "fixed",
             bottom: 0,
             left: 0,
             right: 0,
-            backgroundColor: "var(--color-surface)",
-            borderTop: "1px solid var(--color-border)",
-            padding: "1rem 1.5rem",
-            paddingBottom: "calc(1rem + env(safe-area-inset-bottom))",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "1rem",
-            boxShadow: "0 -4px 10px rgba(0,0,0,0.05)",
             zIndex: 200,
-            transform: "translateY(0)",
-            animation: "slideUp 0.3s ease-out",
-            flexWrap: "wrap",
+            // Offset by sidebar width on desktop; sidebar is off-canvas on mobile
+            paddingLeft: "var(--bulk-bar-sidebar-offset, 0px)",
           }}
+          className={bulkBarVisible ? "bulk-action-bar bulk-bar-in" : "bulk-action-bar bulk-bar-out"}
         >
-          <div style={{ fontWeight: 600, color: "var(--color-primary)" }}>
-            {selectedJobIds.size} jobs selected
-          </div>
-          <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "center" }}>
-            <select
-              value={bulkAnalystId}
-              onChange={(e) => setBulkAnalystId(e.target.value)}
-              style={{
-                padding: "0.5rem",
-                borderRadius: "var(--radius-md)",
-                border: "1px solid var(--color-border)",
-                backgroundColor: "var(--color-background)",
-              }}
-            >
-              <option value="">Select Analyst</option>
-              {assistants.map((a) => (
-                <option key={a._id} value={a._id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
-            <div style={{ display: "flex", gap: "0.5rem" }}>
+          <div
+            style={{
+              background: "linear-gradient(135deg, var(--color-primary-dark) 0%, var(--color-primary) 100%)",
+              borderTop: "2px solid var(--color-primary-light)",
+              padding: "1rem 1.5rem",
+              paddingBottom: "calc(1rem + env(safe-area-inset-bottom))",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "1rem",
+              boxShadow: "0 -8px 24px rgba(44,62,80,0.18)",
+              flexWrap: "wrap",
+            }}
+          >
+            {/* Left: selection count */}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", color: "white" }}>
+              <div style={{
+                backgroundColor: "rgba(255,255,255,0.15)",
+                borderRadius: "999px",
+                padding: "0.35rem 0.9rem",
+                fontWeight: 700,
+                fontSize: "0.95rem",
+                letterSpacing: "0.01em",
+              }}>
+                {selectedJobIds.size} selected
+              </div>
+              <span style={{ fontSize: "0.85rem", opacity: 0.75 }}>Bulk Dispatch</span>
+            </div>
+
+            {/* Right: controls */}
+            <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", alignItems: "center" }}>
+              <select
+                value={bulkAnalystId}
+                onChange={(e) => setBulkAnalystId(e.target.value)}
+                style={{
+                  padding: "0.5rem 0.75rem",
+                  borderRadius: "var(--radius-md)",
+                  border: "1px solid rgba(255,255,255,0.25)",
+                  backgroundColor: "rgba(255,255,255,0.1)",
+                  color: "white",
+                  fontSize: "0.9rem",
+                  outline: "none",
+                  minWidth: "140px",
+                }}
+              >
+                <option value="" style={{ color: "#333", background: "#fff" }}>Select Analyst</option>
+                {assistants.map((a) => (
+                  <option key={a._id} value={a._id} style={{ color: "#333", background: "#fff" }}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
               <input
                 type="date"
                 value={bulkDeadlineDate}
                 onChange={(e) => setBulkDeadlineDate(e.target.value)}
                 min={new Date().toISOString().split("T")[0]}
                 style={{
-                  padding: "0.5rem",
+                  padding: "0.5rem 0.75rem",
                   borderRadius: "var(--radius-md)",
-                  border: "1px solid var(--color-border)",
-                  backgroundColor: "var(--color-background)",
+                  border: "1px solid rgba(255,255,255,0.25)",
+                  backgroundColor: "rgba(255,255,255,0.1)",
+                  color: "white",
+                  fontSize: "0.9rem",
+                  colorScheme: "dark",
+                  outline: "none",
                 }}
               />
               <input
@@ -1347,121 +1411,182 @@ export default function Dispatcher() {
                 value={bulkDeadlineTime}
                 onChange={(e) => setBulkDeadlineTime(e.target.value)}
                 style={{
-                  padding: "0.5rem",
+                  padding: "0.5rem 0.75rem",
                   borderRadius: "var(--radius-md)",
-                  border: "1px solid var(--color-border)",
-                  backgroundColor: "var(--color-background)",
+                  border: "1px solid rgba(255,255,255,0.25)",
+                  backgroundColor: "rgba(255,255,255,0.1)",
+                  color: "white",
+                  fontSize: "0.9rem",
+                  colorScheme: "dark",
+                  outline: "none",
                 }}
               />
+              <button
+                onClick={openBulkConfirmModal}
+                disabled={isBulkDispatching}
+                style={{
+                  padding: "0.55rem 1.25rem",
+                  borderRadius: "var(--radius-md)",
+                  border: "none",
+                  backgroundColor: "white",
+                  color: "var(--color-primary-dark)",
+                  fontWeight: 700,
+                  fontSize: "0.9rem",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.4rem",
+                  transition: "opacity 0.2s",
+                  opacity: isBulkDispatching ? 0.6 : 1,
+                }}
+              >
+                {isBulkDispatching
+                  ? <Spinner size="sm" color="var(--color-primary)" />
+                  : <><Play size={15} fill="currentColor" /> Dispatch {selectedJobIds.size} jobs</>}
+              </button>
+              <button
+                onClick={dismissBulkBar}
+                title="Cancel selection"
+                style={{
+                  padding: "0.55rem",
+                  borderRadius: "var(--radius-md)",
+                  border: "1px solid rgba(255,255,255,0.2)",
+                  backgroundColor: "rgba(255,255,255,0.08)",
+                  color: "rgba(255,255,255,0.7)",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  transition: "all 0.2s",
+                }}
+              >
+                <X size={18} />
+              </button>
             </div>
-            <button
-              onClick={openBulkConfirmModal}
-              className="btn btn-primary"
-              disabled={isBulkDispatching}
-            >
-              {isBulkDispatching ? <Spinner size="sm" color="#fff" /> : `Dispatch ${selectedJobIds.size} jobs`}
-            </button>
-            <button
-              onClick={() => setSelectedJobIds(new Set())}
-              className="btn btn-secondary"
-              style={{ padding: "0.5rem" }}
-            >
-              <X size={20} />
-            </button>
           </div>
         </div>
       )}
 
+      {/* ── Bulk Confirm Modal ── */}
       {isBulkConfirmOpen && (
         <div
           style={{
             position: "fixed",
-            inset: 0,
+            top: 0,
+            left: 0,
+            width: "100vw",
+            height: "100vh",
             backgroundColor: "rgba(0,0,0,0.5)",
             display: "flex",
-            justifyContent: "center",
             alignItems: "center",
-            zIndex: 1000,
+            justifyContent: "center",
+            zIndex: 9999,
+            backdropFilter: "blur(4px)",
             padding: "1rem",
           }}
           onClick={() => setIsBulkConfirmOpen(false)}
         >
           <div
+            className="card"
             style={{
-              backgroundColor: "var(--color-surface)",
-              borderRadius: "var(--radius-lg)",
               width: "100%",
               maxWidth: "500px",
-              boxShadow: "var(--shadow-xl)",
-              display: "flex",
-              flexDirection: "column",
+              padding: "2rem",
+              animation: "slideUp 0.3s ease",
+              borderTop: "4px solid var(--color-primary)",
               maxHeight: "90vh",
+              overflowY: "auto",
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div
+            <h2
               style={{
-                padding: "1.5rem",
-                borderBottom: "1px solid var(--color-border)",
                 display: "flex",
-                justifyContent: "space-between",
                 alignItems: "center",
+                gap: "0.5rem",
+                color: "var(--color-primary)",
+                margin: "0 0 0.5rem 0",
+                fontSize: "1.25rem",
               }}
             >
-              <h2 style={{ fontSize: "1.25rem", fontWeight: 700 }}>Confirm Bulk Dispatch</h2>
-              <button
-                onClick={() => setIsBulkConfirmOpen(false)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  color: "var(--color-text-muted)",
-                }}
-              >
-                <X size={24} />
-              </button>
-            </div>
-            <div style={{ padding: "1.5rem", overflowY: "auto" }}>
-              <p style={{ marginBottom: "1rem" }}>
-                You are about to dispatch <strong>{selectedJobIds.size} jobs</strong> to:
-              </p>
-              <div style={{ padding: "1rem", backgroundColor: "var(--color-background)", borderRadius: "var(--radius-md)", marginBottom: "1rem" }}>
-                <div><strong>Analyst:</strong> {assistants.find(a => a._id === bulkAnalystId)?.name}</div>
-                <div><strong>Deadline:</strong> {formatDate(`${bulkDeadlineDate}T${bulkDeadlineTime}`)}</div>
-              </div>
-              <p style={{ fontWeight: 600, marginBottom: "0.5rem" }}>Selected Jobs:</p>
-              <ul style={{ listStyleType: "none", padding: 0, margin: 0 }}>
-                {jobs
-                  .filter((j) => selectedJobIds.has(j._id))
-                  .map((j) => (
-                    <li key={j._id} style={{ padding: "0.5rem 0", borderBottom: "1px solid var(--color-border-light)" }}>
-                      <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, marginRight: "0.5rem" }}>{formatJobCode(j.jobCode)}</span>
-                      <span style={{ color: "var(--color-text-muted)", fontSize: "0.9rem" }}>{j.clientName}</span>
-                    </li>
-                  ))}
-              </ul>
-            </div>
-            <div
+              <Play size={20} fill="var(--color-primary)" /> Confirm Bulk Dispatch
+            </h2>
+            <p
               style={{
-                padding: "1.5rem",
-                borderTop: "1px solid var(--color-border)",
-                display: "flex",
-                gap: "1rem",
-                justifyContent: "flex-end",
+                fontSize: "0.9rem",
+                color: "var(--color-text-muted)",
+                marginBottom: "1.5rem",
+                lineHeight: 1.5,
               }}
             >
+              The following jobs will be dispatched to the selected analyst with the given deadline.
+            </p>
+
+            {/* Summary */}
+            <div style={{
+              backgroundColor: "var(--color-background)",
+              borderRadius: "var(--radius-md)",
+              padding: "1rem",
+              marginBottom: "1.25rem",
+              border: "1px solid var(--color-border)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.5rem",
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "var(--color-text-muted)", fontSize: "0.9rem" }}>Analyst</span>
+                <span style={{ fontWeight: 600 }}>{assistants.find(a => a._id === bulkAnalystId)?.name}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "var(--color-text-muted)", fontSize: "0.9rem" }}>Deadline</span>
+                <span style={{ fontWeight: 600 }}>{formatBulkDeadline(bulkDeadlineDate, bulkDeadlineTime)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "var(--color-text-muted)", fontSize: "0.9rem" }}>Total Jobs</span>
+                <span style={{ fontWeight: 600 }}>{selectedJobIds.size}</span>
+              </div>
+            </div>
+
+            {/* Job list */}
+            <p style={{ fontWeight: 600, marginBottom: "0.75rem", fontSize: "0.9rem" }}>Selected Jobs:</p>
+            <ul style={{ listStyleType: "none", padding: 0, margin: "0 0 1.5rem 0", display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+              {jobs
+                .filter((j) => selectedJobIds.has(j._id))
+                .map((j) => (
+                  <li key={j._id} style={{
+                    padding: "0.6rem 0.75rem",
+                    backgroundColor: "var(--color-background)",
+                    borderRadius: "var(--radius-md)",
+                    border: "1px solid var(--color-border)",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}>
+                    <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: "0.9rem" }}>{formatJobCode(j.jobCode)}</span>
+                    <span style={{ color: "var(--color-text-muted)", fontSize: "0.85rem" }}>{j.clientName}</span>
+                  </li>
+                ))}
+            </ul>
+
+            {/* Actions */}
+            <div style={{ display: "flex", gap: "1rem", justifyContent: "flex-end" }}>
               <button
+                type="button"
+                className="btn"
+                style={{ border: "1px solid var(--color-border)", padding: "0.6rem 1.5rem" }}
                 onClick={() => setIsBulkConfirmOpen(false)}
-                className="btn btn-secondary"
+                disabled={isBulkDispatching}
               >
                 Cancel
               </button>
               <button
-                onClick={handleBulkDispatch}
                 className="btn btn-primary"
+                onClick={handleBulkDispatch}
                 disabled={isBulkDispatching}
+                style={{ padding: "0.6rem 1.5rem", display: "flex", alignItems: "center", gap: "0.4rem" }}
               >
-                {isBulkDispatching ? <Spinner size="sm" color="#fff" /> : "Confirm Dispatch"}
+                {isBulkDispatching
+                  ? <Spinner size="sm" color="#fff" />
+                  : <><Play size={15} fill="white" /> Confirm Dispatch</>}
               </button>
             </div>
           </div>
