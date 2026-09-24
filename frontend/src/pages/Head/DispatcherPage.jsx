@@ -41,6 +41,14 @@ export default function Dispatcher() {
   const [submittingJobId, setSubmittingJobId] = useState(null);
   const [approvingJobId, setApprovingJobId] = useState(null);
 
+  // Bulk dispatch state
+  const [selectedJobIds, setSelectedJobIds] = useState(new Set());
+  const [bulkAnalystId, setBulkAnalystId] = useState("");
+  const [bulkDeadlineDate, setBulkDeadlineDate] = useState("");
+  const [bulkDeadlineTime, setBulkDeadlineTime] = useState("");
+  const [isBulkConfirmOpen, setIsBulkConfirmOpen] = useState(false);
+  const [isBulkDispatching, setIsBulkDispatching] = useState(false);
+
   // Return Job State
   const [returnModalData, setReturnModalData] = useState(null); // { jobId: string, dept: string }
   const [returnNote, setReturnNote] = useState("");
@@ -278,6 +286,91 @@ export default function Dispatcher() {
     setExpandedJobId((prev) => (prev === jobId ? null : jobId));
   };
 
+  const toggleJobSelection = (jobId) => {
+    setSelectedJobIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(jobId)) {
+        next.delete(jobId);
+      } else {
+        next.add(jobId);
+        setExpandedJobId((prevExpanded) => (prevExpanded === jobId ? null : prevExpanded));
+      }
+      return next;
+    });
+  };
+
+  const openBulkConfirmModal = () => {
+    if (!bulkAnalystId) return alert("Please select an analyst");
+    if (!bulkDeadlineDate || !bulkDeadlineTime) return alert("Please set a deadline");
+    setIsBulkConfirmOpen(true);
+  };
+
+  const handleBulkDispatch = async () => {
+    const bulkId = Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+    const deadline = `${bulkDeadlineDate}T${bulkDeadlineTime}`;
+    const selectedJobs = jobs.filter((j) => selectedJobIds.has(j._id));
+    const analystName = assistants.find((a) => a._id === bulkAnalystId)?.name || "Analyst";
+    let successCount = 0;
+
+    setIsBulkDispatching(true);
+    setIsBulkConfirmOpen(false);
+
+    const bulkMeta = {
+      bulkId,
+      dispatchedBy: user._id,
+      dispatchedAt: new Date().toISOString(),
+      totalJobsInBatch: selectedJobs.length,
+      jobCodes: selectedJobs.map((j) => String(j.jobCode)),
+    };
+
+    for (const job of selectedJobs) {
+      const deptParams = getDeptParams(job);
+
+      const assignmentList = deptParams.map((p) => ({
+        parameterId: p.parameterId._id,
+        name: p.name,
+        type: p.type,
+        unit: p.unit,
+        specification: p.specification || "",
+        isPanel: p.isPanel,
+        panelName: p.panelName,
+        assignedTo: bulkAnalystId,
+      }));
+
+      try {
+        await axios.post(`${API_URL}/api/tests/instances`, {
+          jobId: job._id,
+          deadline,
+          assignments: assignmentList,
+          bulkDispatch: bulkMeta,
+        });
+
+        // Remove card immediately on success
+        setJobs((prev) => prev.filter((j) => j._id !== job._id));
+        setSelectedJobIds((prev) => {
+          const n = new Set(prev);
+          n.delete(job._id);
+          return n;
+        });
+        successCount++;
+      } catch (err) {
+        console.error(`Failed to dispatch job ${job.jobCode}:`, err);
+      }
+    }
+
+    setIsBulkDispatching(false);
+    setBulkAnalystId("");
+    setBulkDeadlineDate("");
+    setBulkDeadlineTime("");
+
+    if (successCount > 0) {
+      setSuccess(`${successCount} job${successCount !== 1 ? "s" : ""} dispatched to ${analystName}`);
+      setTimeout(() => setSuccess(""), 4000);
+      invalidateCache(CACHE_KEYS.JOBS_HEAD_ACTIVE);
+      fetchJobs();
+    }
+  };
+
 
 
 
@@ -326,7 +419,7 @@ export default function Dispatcher() {
           </p>
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "1rem", paddingBottom: selectedJobIds.size >= 2 ? "120px" : "0" }}>
           {jobs.map((job) => {
             const deptParams = getDeptParams(job);
             const isExpanded = expandedJobId === job._id;
@@ -392,6 +485,31 @@ export default function Dispatcher() {
                       gap: "1rem",
                     }}
                   >
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleJobSelection(job._id);
+                      }}
+                      style={{
+                        padding: "0.5rem",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedJobIds.has(job._id)}
+                        readOnly
+                        style={{
+                          width: "24px",
+                          height: "24px",
+                          cursor: "pointer",
+                          accentColor: "var(--color-primary)",
+                        }}
+                      />
+                    </div>
                     <div
                       style={{
                         padding: "0.5rem",
@@ -1166,6 +1284,188 @@ export default function Dispatcher() {
 
       {detailsJob && (
         <JobDetailsModal job={detailsJob} onClose={() => setDetailsJob(null)} />
+      )}
+
+      {selectedJobIds.size >= 2 && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 0,
+            left: 0,
+            right: 0,
+            backgroundColor: "var(--color-surface)",
+            borderTop: "1px solid var(--color-border)",
+            padding: "1rem 1.5rem",
+            paddingBottom: "calc(1rem + env(safe-area-inset-bottom))",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "1rem",
+            boxShadow: "0 -4px 10px rgba(0,0,0,0.05)",
+            zIndex: 200,
+            transform: "translateY(0)",
+            animation: "slideUp 0.3s ease-out",
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ fontWeight: 600, color: "var(--color-primary)" }}>
+            {selectedJobIds.size} jobs selected
+          </div>
+          <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "center" }}>
+            <select
+              value={bulkAnalystId}
+              onChange={(e) => setBulkAnalystId(e.target.value)}
+              style={{
+                padding: "0.5rem",
+                borderRadius: "var(--radius-md)",
+                border: "1px solid var(--color-border)",
+                backgroundColor: "var(--color-background)",
+              }}
+            >
+              <option value="">Select Analyst</option>
+              {assistants.map((a) => (
+                <option key={a._id} value={a._id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <input
+                type="date"
+                value={bulkDeadlineDate}
+                onChange={(e) => setBulkDeadlineDate(e.target.value)}
+                min={new Date().toISOString().split("T")[0]}
+                style={{
+                  padding: "0.5rem",
+                  borderRadius: "var(--radius-md)",
+                  border: "1px solid var(--color-border)",
+                  backgroundColor: "var(--color-background)",
+                }}
+              />
+              <input
+                type="time"
+                value={bulkDeadlineTime}
+                onChange={(e) => setBulkDeadlineTime(e.target.value)}
+                style={{
+                  padding: "0.5rem",
+                  borderRadius: "var(--radius-md)",
+                  border: "1px solid var(--color-border)",
+                  backgroundColor: "var(--color-background)",
+                }}
+              />
+            </div>
+            <button
+              onClick={openBulkConfirmModal}
+              className="btn btn-primary"
+              disabled={isBulkDispatching}
+            >
+              {isBulkDispatching ? <Spinner size="sm" color="#fff" /> : `Dispatch ${selectedJobIds.size} jobs`}
+            </button>
+            <button
+              onClick={() => setSelectedJobIds(new Set())}
+              className="btn btn-secondary"
+              style={{ padding: "0.5rem" }}
+            >
+              <X size={20} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {isBulkConfirmOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            backgroundColor: "rgba(0,0,0,0.5)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 1000,
+            padding: "1rem",
+          }}
+          onClick={() => setIsBulkConfirmOpen(false)}
+        >
+          <div
+            style={{
+              backgroundColor: "var(--color-surface)",
+              borderRadius: "var(--radius-lg)",
+              width: "100%",
+              maxWidth: "500px",
+              boxShadow: "var(--shadow-xl)",
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "90vh",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                padding: "1.5rem",
+                borderBottom: "1px solid var(--color-border)",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <h2 style={{ fontSize: "1.25rem", fontWeight: 700 }}>Confirm Bulk Dispatch</h2>
+              <button
+                onClick={() => setIsBulkConfirmOpen(false)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "var(--color-text-muted)",
+                }}
+              >
+                <X size={24} />
+              </button>
+            </div>
+            <div style={{ padding: "1.5rem", overflowY: "auto" }}>
+              <p style={{ marginBottom: "1rem" }}>
+                You are about to dispatch <strong>{selectedJobIds.size} jobs</strong> to:
+              </p>
+              <div style={{ padding: "1rem", backgroundColor: "var(--color-background)", borderRadius: "var(--radius-md)", marginBottom: "1rem" }}>
+                <div><strong>Analyst:</strong> {assistants.find(a => a._id === bulkAnalystId)?.name}</div>
+                <div><strong>Deadline:</strong> {formatDate(`${bulkDeadlineDate}T${bulkDeadlineTime}`)}</div>
+              </div>
+              <p style={{ fontWeight: 600, marginBottom: "0.5rem" }}>Selected Jobs:</p>
+              <ul style={{ listStyleType: "none", padding: 0, margin: 0 }}>
+                {jobs
+                  .filter((j) => selectedJobIds.has(j._id))
+                  .map((j) => (
+                    <li key={j._id} style={{ padding: "0.5rem 0", borderBottom: "1px solid var(--color-border-light)" }}>
+                      <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, marginRight: "0.5rem" }}>{formatJobCode(j.jobCode)}</span>
+                      <span style={{ color: "var(--color-text-muted)", fontSize: "0.9rem" }}>{j.clientName}</span>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+            <div
+              style={{
+                padding: "1.5rem",
+                borderTop: "1px solid var(--color-border)",
+                display: "flex",
+                gap: "1rem",
+                justifyContent: "flex-end",
+              }}
+            >
+              <button
+                onClick={() => setIsBulkConfirmOpen(false)}
+                className="btn btn-secondary"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkDispatch}
+                className="btn btn-primary"
+                disabled={isBulkDispatching}
+              >
+                {isBulkDispatching ? <Spinner size="sm" color="#fff" /> : "Confirm Dispatch"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <InfiniteScroll hasMore={hasMoreJobs} isLoading={isLoadingMore} onLoadMore={loadMoreJobs} />
