@@ -216,9 +216,14 @@ router.put('/instances/:id/review', protect, authorize('HEAD'), async (req, res)
             instance.results = instance.results.map(r => {
               const obj = r.toObject ? r.toObject() : r;
               if (originalAnalystParams.includes(obj.parameterId.toString())) {
+                // This param stays with original analyst — just reset isSaved for retest
                 return { ...obj, isSaved: false };
               }
-              return obj;
+              if (selectedParamIds.includes(obj.parameterId.toString())) {
+                // This param goes to another analyst — fully wipe so it doesn't show as Approved
+                return { ...obj, value: '', testMethod: '', isSaved: false };
+              }
+              return obj; // keep approved values intact
             });
             instance.status = 'PENDING';
             await instance.save();
@@ -233,28 +238,25 @@ router.put('/instances/:id/review', protect, authorize('HEAD'), async (req, res)
               link: '/assistant'
             });
           } else {
-            // Original analyst has no params to retest — keep instance but mark it waiting
-            // We'll set retestOnly to empty and status stays PENDING_HEAD_REVIEW until
-            // the split instances complete and merge back. Actually, simpler approach:
-            // mark original instance as waiting for the splits to complete.
+            // Original analyst has no params to retest — clear all selected params fully
             instance.retestOnly = [];
-            instance.status = 'PENDING'; // will be re-submitted once splits merge
-            // Wipe only selected params
+            instance.status = 'PENDING';
             instance.results = instance.results.map(r => {
               const obj = r.toObject ? r.toObject() : r;
               if (selectedParamIds.includes(obj.parameterId.toString())) {
-                return { ...obj, isSaved: false };
+                // Fully wipe params going to other analysts — prevents Approved bleed-through
+                return { ...obj, value: '', testMethod: '', isSaved: false };
               }
               return obj;
             });
             await instance.save();
           }
 
-          // Create new instances for other analysts
+          // Create or update instances for other analysts
           for (const [analystId, paramIds] of Object.entries(byAnalyst)) {
             if (analystId === originalAssigneeId) continue; // already handled above
 
-            // Build results array with only the params for this analyst (wiped)
+            // Build wiped results for these params (from previousResults snapshot)
             const analystResults = instance.previousResults
               .filter(r => paramIds.includes(r.parameterId.toString()))
               .map(r => {
@@ -268,32 +270,81 @@ router.put('/instances/:id/review', protect, authorize('HEAD'), async (req, res)
                 };
               });
 
-            // Create a sub-instance linked to the parent
-            const subInstance = new TestInstance({
+            // ── Check if this analyst already has an active instance for this job ──
+            const existingInstance = await TestInstance.findOne({
               jobId: instance.jobId,
-              testCode: `${instance.testCode}-R${Date.now().toString(36).slice(-4)}`,
-              clientName: instance.clientName,
-              deadline: instance.deadline,
               assignedTo: analystId,
-              status: 'PENDING',
-              results: analystResults,
-              retestOnly: paramIds,
-              reviewHistory: [],
-              createdBy: req.user._id,
-              version: instance.version,
-              parentInstanceId: instance._id
+              status: { $in: ['PENDING', 'PENDING_HEAD_REVIEW'] }
             });
-            await subInstance.save();
 
-            await createNotification({
-              recipient: analystId,
-              type: 'WARNING',
-              title: 'Retest Assigned',
-              message: `You have been assigned ${paramIds.length} parameter(s) for retest on ${instance.testCode}.`,
-              relatedJobId: instance.jobId,
-              relatedInstanceId: subInstance._id,
-              link: '/assistant'
-            });
+            if (existingInstance) {
+              // ── Merge: inject new params into the existing instance ──
+              const existingParamIds = new Set(existingInstance.results.map(r => r.parameterId.toString()));
+              const existingRetestIds = new Set(existingInstance.retestOnly.map(id => id.toString()));
+
+              // Add new params to results if not already present
+              for (const result of analystResults) {
+                if (!existingParamIds.has(result.parameterId.toString())) {
+                  existingInstance.results.push(result);
+                }
+              }
+
+              // Add to retestOnly (deduped)
+              for (const paramId of paramIds) {
+                if (!existingRetestIds.has(paramId.toString())) {
+                  existingInstance.retestOnly.push(paramId);
+                }
+              }
+
+              // If analyst had already submitted, pull it back to PENDING for the new params
+              existingInstance.status = 'PENDING';
+
+              existingInstance.reviewHistory.push({
+                action: 'REASSIGN_MERGED',
+                by: req.user._id,
+                role: 'HEAD',
+                note: `${paramIds.length} param(s) merged in from ${instance.testCode} by HEAD reassign`
+              });
+
+              await existingInstance.save();
+
+              await createNotification({
+                recipient: analystId,
+                type: 'WARNING',
+                title: 'Additional Params Assigned',
+                message: `${paramIds.length} additional parameter(s) have been added to your existing test for job ${instance.testCode.split('-')[0]}.`,
+                relatedJobId: instance.jobId,
+                relatedInstanceId: existingInstance._id,
+                link: '/assistant'
+              });
+            } else {
+              // ── No existing instance — create a new sub-instance as before ──
+              const subInstance = new TestInstance({
+                jobId: instance.jobId,
+                testCode: `${instance.testCode}-R${Date.now().toString(36).slice(-4)}`,
+                clientName: instance.clientName,
+                deadline: instance.deadline,
+                assignedTo: analystId,
+                status: 'PENDING',
+                results: analystResults,
+                retestOnly: paramIds,
+                reviewHistory: [],
+                createdBy: req.user._id,
+                version: instance.version,
+                parentInstanceId: instance._id
+              });
+              await subInstance.save();
+
+              await createNotification({
+                recipient: analystId,
+                type: 'WARNING',
+                title: 'Retest Assigned',
+                message: `You have been assigned ${paramIds.length} parameter(s) for retest on ${instance.testCode}.`,
+                relatedJobId: instance.jobId,
+                relatedInstanceId: subInstance._id,
+                link: '/assistant'
+              });
+            }
           }
         }
       } else {

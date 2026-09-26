@@ -14,7 +14,7 @@ const resultParameterSchema = new mongoose.Schema({
 });
 
 const reviewEntrySchema = new mongoose.Schema({
-  action: { type: String, enum: ['APPROVE', 'REASSIGN'], required: true },
+  action: { type: String, enum: ['APPROVE', 'REASSIGN', 'REASSIGN_MERGED'], required: true },
   by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   role: { type: String }, // 'HEAD' or 'ADMIN_OFFICER'
   note: { type: String },
