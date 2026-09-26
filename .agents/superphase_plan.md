@@ -239,7 +239,7 @@ Dependencies within SP1 dictate this sequence:
 ### SP2 — Core Stability
 | Phase | ID | Title | Status |
 |---|---|---|---|
-| SP2.P1 | F14 | Cross-Analyst Reassign Duplication Bug | ⬜ Next |
+| SP2.P1 | F14 | Cross-Analyst Reassign Duplication Bug | ✅ Done |
 | SP2.P2 | B1 | ULR Preview Label Fix (Concurrent Jobs) | ⬜ Upcoming |
 | SP2.P3 | F8 | Toast System Overhaul | ⬜ Upcoming |
 | SP2.P4 | F15 | Global Modal Daemon | ⬜ Upcoming |
@@ -250,6 +250,49 @@ Dependencies within SP1 dictate this sequence:
 | SP2.P9 | F19 | Head Monitor Tab V1 — Cancel, Reassign & Live Progress | ⬜ Upcoming |
 | SP2.P10 | F20 | Head Monitor Tab V2 — Param Split/Merge & Progress Snapshot | ⬜ Upcoming |
 | SP2.P11 | F9 | New Addition of Special Group — Water 10500 | ⬜ Upcoming |
+
+---
+
+### SP2.P1 — F14: Cross-Analyst Reassign Duplication Bug
+
+**Files**: `backend/routes/tests/testResultRoutes.js`, `backend/models/TestInstance.js`
+
+**Confirmed flow this must support:**
+- Head dispatches 6 params across 2 analysts: A gets [1,2,3], B gets [4,5,6]
+- A submits → Head selective-reassigns params 1 & 2 to B (who already has an active instance)
+- Expected: B's single existing card grows to show [1,2,4,5,6] (no duplicate card). A's card retains only param 3 (or is COMPLETED if 3 was approved)
+- B can submit and be further reassigned — the cascade must work the same way at each level
+
+**Bug 1 — Duplicate instance creation:**
+The complex multi-analyst REASSIGN branch (`testResultRoutes.js` lines ~253–297) unconditionally called `new TestInstance(...)` for each non-original analyst, never checking if that analyst already had an active instance for the job. This created a second card on B's dashboard.
+
+**Bug 2 — Approved bleed-through:**
+When params were removed from A and sent to B, only `isSaved: false` was set on A's instance — `value` and `testMethod` were left intact. The frontend read `isSaved: false` as "not yet saved" but still displayed the old `value`, making the param appear as Approved even though it had been reassigned away.
+
+| Subphase | Task |
+|---|---|
+| SP2.P1.1 | **Fix 1 — No duplicates**: Before `new TestInstance(...)`, query `TestInstance.findOne({ jobId, assignedTo: analystId, status: PENDING|PENDING_HEAD_REVIEW })`. If found, merge new params into existing instance (deduped `results` + `retestOnly`), reset status → PENDING, append `REASSIGN_MERGED` to `reviewHistory` |
+| SP2.P1.2 | **Fix 1 — Create path**: If no existing instance found, proceed with original `new TestInstance(...)` unchanged |
+| SP2.P1.3 | **Fix 2a — Branch 1 bleed** (original analyst retains some params): also wipe `value` + `testMethod` for params going to other analysts, not just `isSaved` |
+| SP2.P1.4 | **Fix 2b — Branch 2** (original analyst has NO params being reassigned back): **filter** the reassigned params out of A's `results` entirely (do NOT wipe in-place, REMOVE them). Keep `PENDING_HEAD_REVIEW` so HEAD's review card shows only the surviving params. Edge case: if all of A's params are removed → auto-approve (`COMPLETED`) since there is nothing left for HEAD to see |
+| SP2.P1.5 | **Enum**: Add `REASSIGN_MERGED` to `reviewHistory.action` enum in `TestInstance.js` |
+| SP2.P1.6 | **Socket**: Existing `io.emit('TEST_REVIEWED')` is sufficient — `AssistantDashboard` and `ReviewQueuePage` both listen and re-fetch, so both HEAD and analyst B see updated state automatically |
+
+**Regression found during testing (Pass 2):**
+- Bug reported: HEAD's review card for A disappeared after selective reassign (all params going to B)
+- Root cause: Branch 2 was setting `instance.status = 'PENDING'` which removed A from `PENDING_HEAD_REVIEW`. Fix: changed to `filter()` (removes reassigned params from results array) and keeps `PENDING_HEAD_REVIEW` so remaining params are still visible to HEAD
+- Second report: image showed B's original params as Approved + new params from A as unsaved — **this is the correct and expected state**. The `retestOnly` array on B's instance correctly gates the submit button.
+
+**Regression found during testing (Pass 3 — full flow trace):**
+
+Full flow tested: Diksha had [Iodine, Moisture, Refractive]. HEAD split Refractive → Vishal (Branch 1). Diksha retested + submitted [Iodine, Moisture]. HEAD split Moisture → Vishal (Branch 2 into existing Vishal instance).
+
+- **Bug A (Image 1/2/3)**: Refractive Index still appeared on Diksha's analyst card as "Approved" and in HEAD's review as an empty row after it was sent to Vishal. Root cause: Branch 1 was **wiping** params in-place (`value: '', isSaved: false`) but leaving them in `instance.results`. The frontend shows any result not in `retestOnly` as Approved — the wiped Refractive was not in retestOnly, so it showed as Approved. HEAD's review shows all entries in `results`, so the empty row appeared there too. Fix: use `filter()` then `map()` in Branch 1 — same as Branch 2.
+- **Bug B (Image 5)**: Moisture appeared as "Approved" on Vishal's card after being merged in. Root cause: Vishal's sub-instance was created with `retestOnly = [refractive_id]` (from prior split). When Moisture was merged, the condition `status === PENDING_HEAD_REVIEW` was false (Vishal was PENDING), so Moisture was not added to `retestOnly`. Frontend: anything not in a non-empty `retestOnly` shows as Approved → Moisture showed as Approved. Fix: add to retestOnly if `status === PENDING_HEAD_REVIEW` **OR** `retestOnly.length > 0` (i.e., the instance was already scoped by a prior split).
+
+> ✅ Completed (Pass 3). `backend/routes/tests/testResultRoutes.js`: Branch 1 changed from wipe-map to filter+map; merge block retestOnly condition extended to `PENDING_HEAD_REVIEW || retestOnly.length > 0`.
+
+
 
 ---
 

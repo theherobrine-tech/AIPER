@@ -213,18 +213,27 @@ router.put('/instances/:id/review', protect, authorize('HEAD'), async (req, res)
           if (originalAnalystParams.length > 0) {
             // Original analyst retests some params
             instance.retestOnly = originalAnalystParams;
-            instance.results = instance.results.map(r => {
-              const obj = r.toObject ? r.toObject() : r;
-              if (originalAnalystParams.includes(obj.parameterId.toString())) {
-                // This param stays with original analyst — just reset isSaved for retest
-                return { ...obj, isSaved: false };
-              }
-              if (selectedParamIds.includes(obj.parameterId.toString())) {
-                // This param goes to another analyst — fully wipe so it doesn't show as Approved
-                return { ...obj, value: '', testMethod: '', isSaved: false };
-              }
-              return obj; // keep approved values intact
-            });
+            // REMOVE params going to other analysts from results entirely (don't wipe in-place).
+            // Wiping leaves them in the array — frontend shows non-retestOnly params as 'Approved',
+            // and HEAD's review card shows an empty row for them. Filtering is the correct fix.
+            instance.results = instance.results
+              .filter(r => {
+                const obj = r.toObject ? r.toObject() : r;
+                const paramId = obj.parameterId.toString();
+                // Keep only: params going back to original analyst OR params not selected at all
+                if (selectedParamIds.includes(paramId) && !originalAnalystParams.includes(paramId)) {
+                  return false; // going to another analyst — remove entirely
+                }
+                return true;
+              })
+              .map(r => {
+                const obj = r.toObject ? r.toObject() : r;
+                if (originalAnalystParams.includes(obj.parameterId.toString())) {
+                  // Param stays with original analyst — reset isSaved for retest
+                  return { ...obj, isSaved: false };
+                }
+                return obj; // not selected for reassign — keep approved values intact
+              });
             instance.status = 'PENDING';
             await instance.save();
 
@@ -238,17 +247,22 @@ router.put('/instances/:id/review', protect, authorize('HEAD'), async (req, res)
               link: '/assistant'
             });
           } else {
-            // Original analyst has no params to retest — clear all selected params fully
+            // Original analyst has no params to retest—remove reassigned params from their results
+            // so the HEAD's review card shows only the remaining (non-reassigned) params.
             instance.retestOnly = [];
-            instance.status = 'PENDING';
-            instance.results = instance.results.map(r => {
+            instance.results = instance.results.filter(r => {
               const obj = r.toObject ? r.toObject() : r;
-              if (selectedParamIds.includes(obj.parameterId.toString())) {
-                // Fully wipe params going to other analysts — prevents Approved bleed-through
-                return { ...obj, value: '', testMethod: '', isSaved: false };
-              }
-              return obj;
+              return !selectedParamIds.includes(obj.parameterId.toString());
             });
+
+            if (instance.results.length === 0) {
+              // All of A's params were sent to other analysts—nothing left for HEAD to review on this instance.
+              // Auto-approve: mark COMPLETED so it doesn’t block the job's completion check.
+              instance.status = 'COMPLETED';
+              instance.completedAt = new Date();
+            }
+            // If results remain, keep PENDING_HEAD_REVIEW so HEAD sees the card
+            // with only the surviving params and can explicitly approve them.
             await instance.save();
           }
 
@@ -280,7 +294,6 @@ router.put('/instances/:id/review', protect, authorize('HEAD'), async (req, res)
             if (existingInstance) {
               // ── Merge: inject new params into the existing instance ──
               const existingParamIds = new Set(existingInstance.results.map(r => r.parameterId.toString()));
-              const existingRetestIds = new Set(existingInstance.retestOnly.map(id => id.toString()));
 
               // Add new params to results if not already present
               for (const result of analystResults) {
@@ -289,14 +302,25 @@ router.put('/instances/:id/review', protect, authorize('HEAD'), async (req, res)
                 }
               }
 
-              // Add to retestOnly (deduped)
-              for (const paramId of paramIds) {
-                if (!existingRetestIds.has(paramId.toString())) {
-                  existingInstance.retestOnly.push(paramId);
+              // retestOnly logic — add new params to retestOnly when:
+              //   (a) B already submitted (PENDING_HEAD_REVIEW): existing submitted work stays Approved,
+              //       only new params need re-doing.
+              //   (b) B is a sub-instance from a prior split (retestOnly is already non-empty):
+              //       the existing retestOnly already scopes which params are editable;
+              //       new params must be added to retestOnly or they'll falsely show as Approved.
+              // If B is a fresh PENDING instance with retestOnly=[], leave it untouched so
+              //   all params (old + new) remain editable — adding retestOnly would wrongly
+              //   mark B's own unsaved params as Approved.
+              if (existingInstance.status === 'PENDING_HEAD_REVIEW' || existingInstance.retestOnly.length > 0) {
+                const existingRetestIds = new Set(existingInstance.retestOnly.map(id => id.toString()));
+                for (const paramId of paramIds) {
+                  if (!existingRetestIds.has(paramId.toString())) {
+                    existingInstance.retestOnly.push(paramId);
+                  }
                 }
               }
 
-              // If analyst had already submitted, pull it back to PENDING for the new params
+              // Pull back to PENDING (B must save the new params before submitting again)
               existingInstance.status = 'PENDING';
 
               existingInstance.reviewHistory.push({
