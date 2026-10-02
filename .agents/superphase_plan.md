@@ -243,7 +243,7 @@ Dependencies within SP1 dictate this sequence:
 | SP2.P2 | B1 | ULR Preview Label Fix (Concurrent Jobs) | ✅ Done |
 | SP2.P3 | F8 | Toast System Overhaul | ⬜ Upcoming |
 | SP2.P4 | F15 | Global Modal Daemon | ⬜ Upcoming |
-| SP2.P5 | F13 | Analyst Reassignment History Tracking | ⬜ Upcoming |
+| SP2.P5 | F13 | Analyst Reassignment History Tracking | ✅ Done |
 | SP2.P6 | F2 | Head Pages — Search, Filter & Sort | ⬜ Upcoming |
 | SP2.P7 | F16 | Hide Test Code Suffixes in UI | ⬜ Upcoming |
 | SP2.P8 | F18 | Error Handling & Modal Overhaul | ⬜ Upcoming |
@@ -336,28 +336,32 @@ Full flow tested: Om Prakash had 5 params. HEAD selective-reassigned 2 → Visha
 
 ---
 
-### SP2.P5 — F13: Analyst Reassignment History Tracking
+### SP2.P5 — F13: Analyst Reassignment History Tracking ✅
 
-**Files**: `frontend/src/pages/Head/DispatcherPage.jsx`, `frontend/src/pages/AdminOfficer/JobsPage.jsx`, `frontend/src/components/JobTimeline.jsx`, `backend/routes/tests/testAssignmentRoutes.js`
+**Files changed**: `frontend/src/components/AssignmentHistory.jsx` (created), `frontend/src/components/JobTimeline.jsx`, `frontend/src/components/GlobalJobHistory.jsx`, `frontend/src/components/JobLogTable.jsx`, `frontend/src/pages/Head/DispatcherPage.jsx`
 
-**Priority**: Medium. Depends on F10 (done) and F14 (SP2.P1 done). Data exists; this is mainly a UI surface + one targeted timeline fix.
+**What was built**:
 
-**What exists already**: `TestInstance.reviewHistory` has `{ action, by, note, date }` entries. `REASSIGN` entries are written by the existing flow. The data is reliable after SP2.P1.
+1. **`AssignmentHistory.jsx`** — new reusable accordion. Flattens `testInstances[*].reviewHistory` into a single chronological timeline per job. Optimised with `useMemo` and a `requestAnimationFrame` lazy-render guard (loading buffer before the list mounts). Dept badges for dual-dept jobs. Action labels: `Dispatched`, `Reassigned to [name]`, `Params merged in`, `Results approved for [name]`, `Results rejected for [name]`.
 
-**What to build**:
-1. A collapsible "Assignment History" section within job expand cards (Head dispatcher + Officer job list).
-2. Fix the "Test Execution" chip in `JobTimeline.jsx` to show **all** active analysts, not just the first one.
+2. **`JobLogTable.jsx` + `DispatcherPage.jsx`** — integrated `<AssignmentHistory />` into desktop expand rows and mobile card expand views.
 
-| Subphase | Task |
-|---|---|
-| SP2.P5.1 | In `testAssignmentRoutes.js` `GET /instances`, verify `reviewHistory.by` is populated with name. If not, add `.populate('reviewHistory.by', 'name department')` |
-| SP2.P5.2 | In Head's `DispatcherPage.jsx`, add a collapsible "Assignment History" accordion within the job card expand view |
-| SP2.P5.3 | Build history from `job.testInstances[*].reviewHistory` — flatten all instance histories, sort by `date` ascending, render as vertical timeline |
-| SP2.P5.4 | Each entry: action type (ASSIGNED / REASSIGNED / RETURNED), analyst name, actor name, timestamp, note/reason if present |
-| SP2.P5.5 | Add same section to Admin Officer's `JobsPage.jsx` job card expand view |
-| SP2.P5.6 | No history yet (fresh job): show "Not yet assigned" placeholder |
-| SP2.P5.7 | Verify mobile: history section scrolls within card without overflow |
-| SP2.P5.8 | **Fix multi-analyst display in JobTimeline "Test Execution" chip** (`JobTimeline.jsx` line 121). Currently `instance.assignedTo?.name` shows only one analyst even when multiple TestInstances are active for the same dept. Fix: collect all non-cancelled dept instances, dedupe names, render `"Analyst A, Analyst B (Analysts)"` when 2+. Logic: `const analystNames = [...new Set(deptInstances.filter(i => i.status !== 'CANCELLED').map(i => i.assignedTo?.name).filter(Boolean))]; user: analystNames.length > 1 ? analystNames.join(', ') + ' (Analysts)' : analystNames[0] + ' (Analyst)'` |
+3. **`JobTimeline.jsx` — Step 3 "Test Execution" overhaul**:
+   - Analyst list is live-filtered: only shows analysts whose instance is NOT `COMPLETED` (head-approved). Once approved, that analyst drops off.
+   - `s3_status = 'completed'` only when **all** analysts are `COMPLETED`, not just submitted.
+   - New intermediate desc: **"Results Under Review"** (blue clock) when all submitted but head review ongoing.
+   - `s4_status` (Dept Head Review) stays grey/pending while `s3` is still active; no two consecutive steps shown active simultaneously.
+   - Reassignment detail pill on `warning` state: `Who reassigned: [Head] · from A to B`.
+
+4. **`GlobalJobHistory.jsx` — Reassignment events injected into the Job History Timeline**:
+   - `REASSIGNED_TO_ANALYST` events synthesised from `testInstances`: each new instance (after the first per dept) = a new analyst assignment by the Head.
+   - Trigger `by`/date derived from the previous sibling's REASSIGN entries predating the new instance's `createdAt`.
+   - `REOPENED` and `CANCELLED` instances excluded to avoid false events.
+   - `REASSIGN_MERGED` captured on all instances as "params merged back" events.
+
+5. **Purpose labels** — subtitles on the AssignmentHistory toggle and the GlobalJobHistory modal header so users understand what each view tracks vs the other.
+
+> ✅ **COMPLETE**. All subphases delivered. No backend changes required.
 
 ---
 
