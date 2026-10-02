@@ -8,7 +8,7 @@
 |---|---|---|---|
 | SP1 | MVP Delivery | F1, B6, B5, F12, F5, F10, F4, F17, B2, B3 | ✅ Complete |
 | SP2 | Core Stability | F14, B1, F8, F15, F13, F2, F16, F18, F19, F20, F9 | ⬜ Active |
-| SP3 | UX Polish + Infrastructure | B4, B7, B8, B9, B10, F7, F3, F6, C2, C3, C4, C5, C6 | Upcoming |
+| SP3 | UX Polish + Infrastructure | B4, B7, B8, B9, B10, F7, F3, F6, C2, C3, C4, C5, C6, F21 | Upcoming |
 | SP4 | Documentation | F11 | Future |
 | SP5 | Future (No Start Date) | C1, C7 | Deferred |
 
@@ -296,7 +296,33 @@ Full flow tested: Diksha had [Iodine, Moisture, Refractive]. HEAD split Refracti
 
 ---
 
+### SP2.P5 — F13: Analyst Reassignment History Tracking
+
+**Files**: `frontend/src/pages/Head/DispatcherPage.jsx`, `frontend/src/pages/AdminOfficer/JobsPage.jsx`, `frontend/src/components/JobTimeline.jsx`, `backend/routes/tests/testAssignmentRoutes.js`
+
+**Priority**: Medium. Depends on F10 (done) and F14 (SP2.P1 done). Data exists; this is mainly a UI surface + one targeted timeline fix.
+
+**What exists already**: `TestInstance.reviewHistory` has `{ action, by, note, date }` entries. `REASSIGN` entries are written by the existing flow. The data is reliable after SP2.P1.
+
+**What to build**:
+1. A collapsible "Assignment History" section within job expand cards (Head dispatcher + Officer job list).
+2. Fix the "Test Execution" chip in `JobTimeline.jsx` to show **all** active analysts, not just the first one.
+
+| Subphase | Task |
+|---|---|
+| SP2.P5.1 | In `testAssignmentRoutes.js` `GET /instances`, verify `reviewHistory.by` is populated with name. If not, add `.populate('reviewHistory.by', 'name department')` |
+| SP2.P5.2 | In Head's `DispatcherPage.jsx`, add a collapsible "Assignment History" accordion within the job card expand view |
+| SP2.P5.3 | Build history from `job.testInstances[*].reviewHistory` — flatten all instance histories, sort by `date` ascending, render as vertical timeline |
+| SP2.P5.4 | Each entry: action type (ASSIGNED / REASSIGNED / RETURNED), analyst name, actor name, timestamp, note/reason if present |
+| SP2.P5.5 | Add same section to Admin Officer's `JobsPage.jsx` job card expand view |
+| SP2.P5.6 | No history yet (fresh job): show "Not yet assigned" placeholder |
+| SP2.P5.7 | Verify mobile: history section scrolls within card without overflow |
+| SP2.P5.8 | **Fix multi-analyst display in JobTimeline "Test Execution" chip** (`JobTimeline.jsx` line 121). Currently `instance.assignedTo?.name` shows only one analyst even when multiple TestInstances are active for the same dept. Fix: collect all non-cancelled dept instances, dedupe names, render `"Analyst A, Analyst B (Analysts)"` when 2+. Logic: `const analystNames = [...new Set(deptInstances.filter(i => i.status !== 'CANCELLED').map(i => i.assignedTo?.name).filter(Boolean))]; user: analystNames.length > 1 ? analystNames.join(', ') + ' (Analysts)' : analystNames[0] + ' (Analyst)'` |
+
+---
+
 ### SP2.P9 — F19: Head Monitor Tab V1 — Cancel, Reassign & Live Progress
+
 
 **What it is:** A new **Monitor** tab on the Head dashboard that covers the intermediate state between Dispatch and Review. Once a job is dispatched, it lives here until the analyst submits it for review.
 
@@ -379,6 +405,7 @@ Dispatch ──→ Monitor ──→ Review ─→ Done
 | SP3.P11 | F7 | Dashboard History Revamp |
 | SP3.P12 | F3 | Transfer List Rework |
 | SP3.P13 | F6 | Job Grouping in Officer's Page |
+| SP3.P14 | F21 | OTP-Based Password Reset |
 
 ---
 
@@ -535,6 +562,41 @@ Job has `chemical.status: ASSIGNED_TO_ASSISTANT`. Param IDs:
 | SP3.P5.7 | Test: dispatch job to 2 analysts → one submits → HEAD selective-reassigns 1 param to the OTHER analyst who already has an active instance → verify only 1 instance per analyst exists, no new testCode created |
 | SP3.P5.8 | Test: selective-reassign to a brand-new analyst (not previously dispatched to) → verify new instance IS created (this path must still work) |
 | SP3.P5.9 | Test Approved display: after partial reassign, the retained params on the original instance must show as Approved only if they were genuinely approved (not if they were just submitted) |
+
+---
+
+### SP3.P14 — F21: OTP-Based Password Reset
+
+**Files**: `backend/routes/authRoutes.js`, `frontend/src/pages/Login.jsx`
+
+**Why SP3**: The full OTP infrastructure already exists — `Otp` model, `sendOtpEmail` (Brevo), `POST /api/auth/request-otp`, and `POST /api/auth/verify-otp` are all live. `verify-otp` currently issues a JWT for a direct OTP login. This feature adds one missing link: a `POST /api/auth/reset-password-with-otp` route that accepts `{ email, otp, newPassword }` and updates the password after verifying the OTP. The frontend flow in `Login.jsx` already has OTP and password-change UI panels; they just need wiring together with a "Forgot Password?" entry point.
+
+**User flow**:
+```
+Login screen
+  └─ "Forgot Password?" link
+       └─ Step 1: Enter email → OTP sent to inbox
+            └─ Step 2: Enter OTP
+                 └─ Step 3: Enter new password + confirm
+                      └─ Success → redirect to Login
+```
+
+**Scope boundary**: This is self-service reset by the user. Admin-initiated password resets (assigning a temp password) are already handled by the Admin dashboard and remain unchanged.
+
+| Subphase | Task |
+|---|---|
+| SP3.P14.1 | **Backend — new route**: Add `POST /api/auth/reset-password-with-otp` (no auth required — unauthenticated route). Body: `{ email, otp, newPassword }`. Logic: verify OTP via `Otp.findOne({ email, code: otp })`; if invalid/missing return 401; if valid, delete the OTP record, find User by email, set `user.password = newPassword`, set `user.requiresPasswordChange = false`, save. Audit log: `PASSWORD_RESET_VIA_OTP` |
+| SP3.P14.2 | **Backend — OTP expiry**: `Otp` model already has a TTL index (confirm it). If it doesn’t, add `createdAt: { type: Date, expires: 300 }` (5 minutes). Do not add it twice |
+| SP3.P14.3 | **Frontend — entry point**: In `Login.jsx`, add a `"Forgot Password?"` text link below the Password input on the login form. On click, transition the page to `mode = 'forgot'` (new local state) |
+| SP3.P14.4 | **Frontend — Step 1 (Email entry)**: Show an email input + "Send OTP" button. On submit, call `POST /api/auth/request-otp`. On success, advance to Step 2. On failure, show toast |
+| SP3.P14.5 | **Frontend — Step 2 (OTP entry)**: Show a 6-digit OTP input (single field or 6 individual digit boxes). "Verify OTP" button calls `POST /api/auth/reset-password-with-otp` with `{ email, otp, newPassword: '' }` — wait, actually just verify the OTP is valid here before asking for password. Alternatively: do all three fields in one step (email pre-filled from Step 1, OTP, new password, confirm password) and submit once to `reset-password-with-otp`. **Decision**: single-step form after OTP is received is simpler and less error-prone |
+| SP3.P14.6 | **Frontend — Step 2 revised (single confirm form)**: After OTP is sent, show: OTP field (pre-focused), New Password field, Confirm Password field, and "Reset Password" button. On submit, call `POST /api/auth/reset-password-with-otp`. On success, show success toast + return to login. On OTP mismatch, show inline error |
+| SP3.P14.7 | **Frontend — Resend OTP**: Add a "Resend OTP" button in Step 2 with a 60-second cooldown (countdown timer shown inline). On click, call `request-otp` again |
+| SP3.P14.8 | **Frontend — Back to login**: Provide a "Back to Login" link at each step so the user is never trapped |
+| SP3.P14.9 | Client-side validation: new password must be at least 8 characters. Confirm password must match. Show inline errors, not toasts, for these |
+| SP3.P14.10 | Verify mobile: each step must fit on one screen without scrolling. OTP input must not trigger autocorrect/autocapitalize. New password field must have `type="password"` with show/hide toggle |
+
+---
 
 ### SP4 — Documentation
 | Phase | ID | Title |

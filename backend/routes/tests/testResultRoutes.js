@@ -327,7 +327,7 @@ router.put('/instances/:id/review', protect, authorize('HEAD'), async (req, res)
                 action: 'REASSIGN_MERGED',
                 by: req.user._id,
                 role: 'HEAD',
-                note: `${paramIds.length} param(s) merged in from ${instance.testCode} by HEAD reassign`
+                note: `${paramIds.length} ${paramIds.length === 1 ? 'Parameter' : 'Parameters'} added from ${instance.testCode.split('-')[0]}`
               });
 
               await existingInstance.save();
@@ -342,10 +342,22 @@ router.put('/instances/:id/review', protect, authorize('HEAD'), async (req, res)
                 link: '/assistant'
               });
             } else {
-              // ── No existing instance — create a new sub-instance as before ──
+              // ── No existing instance — generate a clean letter-suffix test code ──
+              // Strip the trailing letter from the parent test code to get the dept-base.
+              // e.g. "2607031609-2a" → "2607031609-2"
+              // Then count all instances whose code starts with that base to find the next letter.
+              const deptBase = instance.testCode.replace(/[a-z]$/, '');
+              const existingCount = await TestInstance.countDocuments({
+                jobId: instance.jobId,
+                testCode: { $regex: `^${deptBase.replace(/-/g, '\\-')}[a-z]` }
+              });
+              // existingCount=1 → next is 'b' (charCode 98), =2 → 'c', etc.
+              const newLetter = String.fromCharCode(97 + existingCount);
+              const newTestCode = `${deptBase}${newLetter}`;
+
               const subInstance = new TestInstance({
                 jobId: instance.jobId,
-                testCode: `${instance.testCode}-R${Date.now().toString(36).slice(-4)}`,
+                testCode: newTestCode,
                 clientName: instance.clientName,
                 deadline: instance.deadline,
                 assignedTo: analystId,
@@ -362,8 +374,8 @@ router.put('/instances/:id/review', protect, authorize('HEAD'), async (req, res)
               await createNotification({
                 recipient: analystId,
                 type: 'WARNING',
-                title: 'Retest Assigned',
-                message: `You have been assigned ${paramIds.length} parameter(s) for retest on ${instance.testCode}.`,
+                title: 'Parameters Assigned',
+                message: `You have been assigned ${paramIds.length} parameter(s) on test ${newTestCode}.`,
                 relatedJobId: instance.jobId,
                 relatedInstanceId: subInstance._id,
                 link: '/assistant'

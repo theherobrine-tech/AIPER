@@ -333,20 +333,35 @@ export default function ReviewQueue() {
                         >
                           Previous Review History
                         </div>
-                        {inst.reviewHistory.map((rh, i) => (
-                          <div
-                            key={i}
-                            style={{
-                              fontSize: "0.8rem",
-                              color: "var(--color-text-muted)",
-                              marginBottom: "0.3rem",
-                            }}
-                          >
-                            <strong>{rh.role}</strong> {rh.action}{" "}
-                            {rh.note && `("${rh.note}")`}{" "}
-                            {formatDateTime(rh.date)}
-                          </div>
-                        ))}
+                        {inst.reviewHistory.map((rh, i) => {
+                          const ACTION_LABELS = {
+                            REASSIGN: 'Reassigned to Analyst',
+                            REASSIGN_MERGED: 'Parameters added via reassign:',
+                            APPROVE: 'Approved',
+                            REJECT: 'Rejected',
+                          };
+                          const label = ACTION_LABELS[rh.action] || rh.action;
+                          const isMerged = rh.action === 'REASSIGN_MERGED';
+                          return (
+                            <div
+                              key={i}
+                              style={{
+                                fontSize: "0.8rem",
+                                color: "var(--color-text-muted)",
+                                marginBottom: "0.3rem",
+                              }}
+                            >
+                              <strong>{rh.role}</strong>{" "}
+                              <span style={{ color: "var(--color-text)" }}>{label}</span>{" "}
+                              {rh.note && (
+                                <span style={{ fontStyle: isMerged ? "normal" : "italic" }}>
+                                  {isMerged ? rh.note : `\u2014 ${rh.note}`}
+                                </span>
+                              )}{" "}
+                              {formatDateTime(rh.date)}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
 
