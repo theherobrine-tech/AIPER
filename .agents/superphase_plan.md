@@ -240,7 +240,7 @@ Dependencies within SP1 dictate this sequence:
 | Phase | ID | Title | Status |
 |---|---|---|---|
 | SP2.P1 | F14 | Cross-Analyst Reassign Duplication Bug | ✅ Done |
-| SP2.P2 | B1 | ULR Preview Label Fix (Concurrent Jobs) | ⬜ Upcoming |
+| SP2.P2 | B1 | ULR Preview Label Fix (Concurrent Jobs) | ✅ Done |
 | SP2.P3 | F8 | Toast System Overhaul | ⬜ Upcoming |
 | SP2.P4 | F15 | Global Modal Daemon | ⬜ Upcoming |
 | SP2.P5 | F13 | Analyst Reassignment History Tracking | ⬜ Upcoming |
@@ -311,6 +311,28 @@ Full flow tested: Om Prakash had 5 params. HEAD selective-reassigned 2 → Visha
 >
 > Files changed: `backend/routes/tests/testResultRoutes.js`, `backend/models/TestInstance.js`, `frontend/src/pages/Head/ReviewQueuePage.jsx`
 
+
+---
+
+### SP2.P2 — B1: ULR Preview Label Fix (Concurrent Jobs)
+
+**Files**: `frontend/src/pages/AdminOfficer/JobsPage.jsx`, `backend/routes/jobs/jobCrudRoutes.js`
+
+**Root causes addressed:**
+- **Bug 1 — Wrong label**: Help text said "assigned when the job is submitted" but ULR assignment for NABL jobs happens at Head Approval via `ulrService.attemptUlrAssignment()`, not at form save.
+- **Bug 2 — Preview presented as a guarantee**: The `next-ulr` endpoint returns `currentValue + 1` as a read-only snapshot. Multiple concurrent NABL jobs all see the same preview number, but counter only increments at completion — whoever finishes second gets `currentValue + 2`. The preview was misleading.
+- **Bug 3 — Stale NABL preview bleeding into Non-NABL section**: The `useEffect` only fetched on switch-to-nabl/hybrid but never cleared on switch-away. Line 2149's Non-NABL auto-assign block read `ulrPreview` directly, so an old NABL value could bleed in.
+
+| Subphase | Task |
+|---|---|
+| SP2.P2.1 | Fix label in NABL block: removed incorrect "This ULR will be officially assigned when the job is submitted" text |
+| SP2.P2.2 | Input value prefixed with `~` in creation mode (`~ TC-12434YYXXXXXXXX`) to signal it is approximate. Replaced with plain `ulr_no` in edit mode (unchanged). Added `Loading…` fallback during fetch |
+| SP2.P2.3 | `useEffect` (line ~364) extended with `else { setUlrPreview("") }` — clears stale preview when switching away from nabl/hybrid mode |
+| SP2.P2.4 | Non-NABL auto-assign block (line ~2154) changed from `{ulrPreview \|\| '—'}` to `{'—'}` — removed dependency on shared `ulrPreview` state entirely |
+| SP2.P2.5 | Added explanatory comment in `jobCrudRoutes.js` `GET /next-ulr` route documenting the in-flight NABL limitation. No logic change |
+| SP2.P2.6 | Label cleaned further per user review: `(Auto-assigned)` parenthetical removed; label is now just `ULR Number *`. Caption trimmed to "The number shown here is an estimate." in `#6b7280` |
+
+> ✅ Completed. File changed: `frontend/src/pages/AdminOfficer/JobsPage.jsx` (lines ~364–370, ~2017–2025, ~2154). Comment added to `backend/routes/jobs/jobCrudRoutes.js` (lines ~69–72). No backend logic changes; no new endpoints.
 
 ---
 
