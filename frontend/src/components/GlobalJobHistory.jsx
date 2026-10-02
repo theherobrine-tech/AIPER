@@ -4,7 +4,85 @@ import { formatDateTime } from '../utils/dateUtils';
 
 export default function GlobalJobHistory({ history, job, onClose }) {
   // Support passing either full job object or just history array
-  const historyData = job?.history || history || [];
+  const baseHistory = job?.history || history || [];
+  
+  const reassignEvents = [];
+  if (job?.testInstances) {
+    const instancesByDept = {};
+    job.testInstances.forEach(inst => {
+      // Skip reopened/cancelled — they are not head-reassign targets
+      if (['REOPENED', 'CANCELLED'].includes(inst.status)) return;
+      const dept = (inst.department || inst.createdBy?.department || inst.assignedTo?.department || '').toLowerCase();
+      if (!dept) return;
+      if (!instancesByDept[dept]) instancesByDept[dept] = [];
+      instancesByDept[dept].push(inst);
+    });
+
+    Object.keys(instancesByDept).forEach(dept => {
+      // Sort oldest-first
+      const sorted = [...instancesByDept[dept]].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+      sorted.forEach((inst, idx) => {
+        const toAnalyst = inst.assignedTo?.name || 'Analyst';
+        const instCreatedAt = new Date(inst.createdAt);
+
+        if (idx === 0) {
+          // First instance = initial dispatch — skip (already in job.history as DISPATCHED)
+          // But still capture REASSIGN_MERGED on this instance (params sent back here)
+          (inst.reviewHistory || [])
+            .filter(rh => rh.action === 'REASSIGN_MERGED')
+            .forEach(rh => {
+              reassignEvents.push({
+                action: 'REASSIGNED_TO_ANALYST',
+                timestamp: rh.date,
+                by: rh.by,
+                note: `params merged back to ${toAnalyst}`,
+              });
+            });
+          return;
+        }
+
+        // Each subsequent instance = a new analyst was assigned by the Head.
+        // Find who triggered it: look at ALL previous siblings for a REASSIGN entry
+        // that happened at or before this instance's creation time.
+        let trigger = null;
+        for (let p = idx - 1; p >= 0; p--) {
+          const candidate = (sorted[p].reviewHistory || [])
+            .filter(rh => ['REASSIGN', 'REASSIGN_MERGED'].includes(rh.action) && new Date(rh.date) <= instCreatedAt)
+            .sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+          if (candidate) { trigger = candidate; break; }
+        }
+
+        const fromAnalyst = sorted[idx - 1]?.assignedTo?.name;
+        const note = fromAnalyst && fromAnalyst !== toAnalyst
+          ? `from ${fromAnalyst} to ${toAnalyst}`
+          : `to ${toAnalyst}`;
+
+        reassignEvents.push({
+          action: 'REASSIGNED_TO_ANALYST',
+          // Use inst.createdAt as the event time — most reliable
+          timestamp: inst.createdAt,
+          by: trigger?.by || null,
+          note,
+        });
+
+        // Also capture any REASSIGN_MERGED on this non-primary instance
+        (inst.reviewHistory || [])
+          .filter(rh => rh.action === 'REASSIGN_MERGED')
+          .forEach(rh => {
+            reassignEvents.push({
+              action: 'REASSIGNED_TO_ANALYST',
+              timestamp: rh.date,
+              by: rh.by,
+              note: `params merged back to ${toAnalyst}`,
+            });
+          });
+      });
+    });
+  }
+
+  const historyData = [...baseHistory, ...reassignEvents].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
   const getActionIcon = (action) => {
     switch (action) {
       case 'CREATED': return <PlusCircle size={16} />;
@@ -13,6 +91,7 @@ export default function GlobalJobHistory({ history, job, onClose }) {
       case 'RESUBMITTED': return <RefreshCw size={16} />;
       case 'UPDATED': return <Edit size={16} />;
       case 'RETEST_REQUESTED': return <RotateCcw size={16} />;
+      case 'REASSIGNED_TO_ANALYST': return <RotateCcw size={16} />;
       case 'COMPLETED': return <CheckCircle size={16} />;
       default: return <Clock size={16} />;
     }
@@ -26,6 +105,7 @@ export default function GlobalJobHistory({ history, job, onClose }) {
       case 'RESUBMITTED': return '#F59E0B';
       case 'UPDATED': return '#3B82F6';
       case 'RETEST_REQUESTED': return '#F59E0B';
+      case 'REASSIGNED_TO_ANALYST': return '#F59E0B';
       case 'COMPLETED': return '#10B981';
       default: return 'var(--color-text-muted)';
     }

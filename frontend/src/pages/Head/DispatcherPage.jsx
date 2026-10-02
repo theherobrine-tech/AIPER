@@ -17,6 +17,7 @@ import { formatJobCode } from "../../utils/serialUtils";
 import { formatDate } from "../../utils/dateUtils";
 import InfiniteScroll from "../../components/InfiniteScroll";
 import JobDetailsModal from "../../components/JobDetailsModal";
+import AssignmentHistory from "../../components/AssignmentHistory";
 
 const isOverdue = (deadlineStr) => {
   if (!deadlineStr) return false;
@@ -1193,6 +1194,7 @@ export default function Dispatcher() {
                         );
                       })()
                     )}
+                    <AssignmentHistory testInstances={job.testInstances} />
                   </div>
                 )}
               </div>

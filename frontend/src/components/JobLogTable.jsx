@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import JobTimeline from "./JobTimeline";
 import GlobalJobHistory from "./GlobalJobHistory";
+import AssignmentHistory from "./AssignmentHistory";
 import ReportModal from "./ReportModal";
 import InfiniteScroll from "./InfiniteScroll";
 import { formatJobCode } from "../utils/serialUtils";
@@ -569,6 +570,7 @@ export default function JobLogTable({
                             allJobs={jobs}
                             onReopen={onReopen}
                           />
+                          <AssignmentHistory testInstances={job.testInstances} />
                         </div>
                       </td>
                     </tr>
@@ -805,7 +807,7 @@ export default function JobLogTable({
                 onClick={() => toggleExpand(job._id)}
                 style={{
                   width: "100%",
-                  padding: "0.75rem",
+                  padding: "0.65rem 0.75rem",
                   background:
                     expandedJobId === job._id
                       ? "var(--color-primary)"
@@ -821,19 +823,24 @@ export default function JobLogTable({
                   borderRadius: "8px",
                   cursor: "pointer",
                   display: "flex",
-                  justifyContent: "center",
+                  flexDirection: "column",
                   alignItems: "center",
-                  gap: "0.5rem",
+                  gap: "0.1rem",
                   fontWeight: 600,
                   transition: "all 0.2s",
                 }}
               >
-                {expandedJobId === job._id ? "Hide Timeline" : "View Timeline"}{" "}
-                {expandedJobId === job._id ? (
-                  <ChevronUp size={16} />
-                ) : (
-                  <ChevronDown size={16} />
-                )}
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  {expandedJobId === job._id ? "Hide Workflow Timeline" : "View Workflow Timeline"}{" "}
+                  {expandedJobId === job._id ? (
+                    <ChevronUp size={16} />
+                  ) : (
+                    <ChevronDown size={16} />
+                  )}
+                </div>
+                <div style={{ fontSize: "0.72rem", fontWeight: 400, opacity: 0.75 }}>
+                  {expandedJobId === job._id ? "" : "Pipeline stages and current status per department"}
+                </div>
               </button>
 
               {expandedJobId === job._id && (
@@ -850,6 +857,7 @@ export default function JobLogTable({
                   }}
                 >
                   <JobTimeline job={job} allJobs={jobs} onReopen={onReopen} />
+                  <AssignmentHistory testInstances={job.testInstances} />
                 </div>
               )}
             </div>

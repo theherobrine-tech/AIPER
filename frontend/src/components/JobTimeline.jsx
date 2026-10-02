@@ -47,7 +47,7 @@ export default function JobTimeline({ job, allJobs = [], onReopen }) {
     const totalRequired = (microRequired ? 1 : 0) + (chemicalRequired ? 1 : 0);
     const totalCompleted = (microRequired && microDone ? 1 : 0) + (chemicalRequired && chemicalDone ? 1 : 0);
     const progress = totalRequired === 0 ? 0 : Math.round((totalCompleted / totalRequired) * 100);
-    
+
     // allDone should be true if progress is 100% AND at least one thing was required
     const allDone = progress === 100 && totalRequired > 0;
     const bothDone = microRequired && chemicalRequired && microDone && chemicalDone;
@@ -66,7 +66,7 @@ export default function JobTimeline({ job, allJobs = [], onReopen }) {
 
       const s1_status = 'completed';
       const dStatus = distData?.status || 'PENDING';
-      
+
       const s2_status = dStatus === 'RETURNED'
         ? 'warning'
         : dStatus === 'PENDING_REVIEW'
@@ -80,46 +80,107 @@ export default function JobTimeline({ job, allJobs = [], onReopen }) {
       let s3_status = 'pending', s3_date = null;
       let s4_status = 'pending';
 
+      const deptName = title.split(' ')[0].toLowerCase();
+      const deptInstances = instances.filter(i => {
+        const d = (i.department || i.createdBy?.department || '').toLowerCase();
+        return d === deptName && i.status !== 'CANCELLED';
+      });
+
+      const anyPending = deptInstances.some(i => ['PENDING', 'REOPENED', 'HELD'].includes(i.status));
+      const allFinished = deptInstances.length > 0 && !anyPending;
+      const allCompleted = deptInstances.length > 0 && deptInstances.every(i => i.status === 'COMPLETED');
+
       // s3 = Test Execution
+      // s3 is 'completed' only when ALL analysts have been head-approved (COMPLETED status)
       if (dStatus === 'PENDING_REVIEW' || dStatus === 'REVIEW_APPROVED' || dStatus === 'PENDING' || dStatus === 'RETURNED') {
-        // Analyst not yet dispatched, or job returned to officer
         s3_status = 'pending';
+      } else if (allCompleted || dStatus === 'COMPLETED') {
+        // All head-approved
+        s3_status = 'completed';
+        s3_date = headApproval ? headApproval.date : (instance?.updatedAt || null);
+      } else if (allFinished) {
+        // All submitted but head review still ongoing — show as active with different desc
+        s3_status = 'active';
       } else if (dStatus === 'ASSIGNED_TO_ASSISTANT') {
-        s3_status = instance ? (latestReassign && instance.status === 'PENDING' ? 'warning' : 'active') : 'pending';
-      } else if (dStatus === 'PENDING_HEAD_REVIEW' || dStatus === 'COMPLETED') {
+        s3_status = instance ? (latestReassign && anyPending ? 'warning' : 'active') : 'pending';
+      } else if (dStatus === 'PENDING_HEAD_REVIEW') {
         s3_status = 'completed';
         s3_date = headApproval ? headApproval.date : instance?.updatedAt;
       } else if (instance) {
-        // Fallback: infer from instance status
-        if (instance.status === 'PENDING') {
+        if (anyPending) {
           s3_status = latestReassign ? 'warning' : 'active';
-        } else if (instance.status === 'PENDING_HEAD_REVIEW' || instance.status === 'COMPLETED') {
+        } else if (allCompleted) {
           s3_status = 'completed';
           s3_date = headApproval ? headApproval.date : instance.updatedAt;
+        } else {
+          // Some submitted, some pending head review
+          s3_status = 'active';
         }
       }
 
       // s4 = Dept Head Review
-      if (dStatus === 'PENDING_HEAD_REVIEW') {
-        s4_status = 'active';
-      } else if (dStatus === 'COMPLETED') {
+      // Only activate once step 3 is fully done (all head-approved = allCompleted)
+      // Keeping PENDING_HEAD_REVIEW dStatus path for older single-instance jobs
+      if (dStatus === 'COMPLETED' || allCompleted) {
         s4_status = 'completed';
+      } else if (dStatus === 'PENDING_HEAD_REVIEW') {
+        // Older single-instance job: head is actively reviewing
+        s4_status = 'active';
       } else if (instance && dStatus !== 'PENDING_REVIEW' && dStatus !== 'REVIEW_APPROVED' && dStatus !== 'PENDING' && dStatus !== 'ASSIGNED_TO_ASSISTANT' && dStatus !== 'RETURNED') {
-        // Fallback for older jobs without accurate dStatus
         if (instance.status === 'PENDING_HEAD_REVIEW') s4_status = 'active';
         else if (headApproval || instance.status === 'COMPLETED') s4_status = 'completed';
       }
+      // Otherwise: s4_status remains 'pending' (grey) — step 3 not done yet
 
       const isReopened = instance?.status === 'REOPENED';
       if (isReopened) s4_status = 'reopened';
 
       const isDeptCompleted = s4_status === 'completed';
 
+      const allAnalysts = [...new Set(deptInstances.map(i => i.assignedTo?.name).filter(Boolean))];
+
+      // displayAnalysts: exclude analysts whose results have already been head-approved (COMPLETED)
+      // This gives a live "still being processed" view of who is involved
+      let displayAnalysts;
+      if (allCompleted) {
+        // All done — show full contributor list as historical record
+        displayAnalysts = allAnalysts;
+      } else {
+        // Show only analysts not yet fully approved
+        const pendingInstances = deptInstances.filter(i => i.status !== 'COMPLETED');
+        const pendingNames = [...new Set(pendingInstances.map(i => i.assignedTo?.name).filter(Boolean))];
+        displayAnalysts = pendingNames.length > 0 ? pendingNames : allAnalysts;
+      }
+
+      const step3User = displayAnalysts.length > 1
+        ? displayAnalysts.join(', ')
+        : (displayAnalysts[0] ? displayAnalysts[0] : 'Pending Analyst');
+
+      // s3 description depends on sub-state
+      let s3_desc;
+      if (s3_status === 'completed') s3_desc = 'Results Submitted';
+      else if (s3_status === 'warning') s3_desc = 'Reassigned';
+      else if (allFinished && !allCompleted) s3_desc = 'Results Under Review';
+      else s3_desc = 'Analysis in Progress';
+
+      // Build reassign detail for step 3 warning state
+      let step3Detail = null;
+      if (s3_status === 'warning' && latestReassign) {
+        const reassigner = latestReassign.by?.name || 'Dept Head';
+        const activeAnalysts = deptInstances.map(i => i.assignedTo?.name).filter(Boolean);
+        const uniqueAnalysts = [...new Set(activeAnalysts)];
+        if (uniqueAnalysts.length > 1) {
+          step3Detail = `Who reassigned: ${reassigner} · from ${uniqueAnalysts[0]} to ${uniqueAnalysts[uniqueAnalysts.length - 1]}`;
+        } else {
+          step3Detail = `Who reassigned: ${reassigner} · to ${uniqueAnalysts[0] || instance?.assignedTo?.name || 'analyst'}`;
+        }
+      }
+
       const steps = [
-        { id: 1, title: isRetest ? 'Retest Allocation' : 'Job Allocation', desc: 'Allocated by Admin Officer', status: s1_status, date: cycleJob.createdAt, user: `${cycleJob.createdBy?.name || 'Admin Officer'} (Admin Officer)` },
-        { id: 2, title: 'Analyst Dispatch', desc: s2_status === 'warning' ? 'Returned to Admin Officer' : (instance ? `Code: ${formatJobCode(instance.testCode)}` : 'Awaiting Dept Head Dispatch'), status: s2_status, date: instance?.createdAt, user: instance ? `${instance.createdBy?.name} (${title.split(' ')[0]} Head)` : (distData?.assignedHead?.name ? `${distData.assignedHead.name} (Pending)` : 'Pending Dept Head') },
-        { id: 3, title: 'Test Execution', desc: s3_status === 'completed' ? 'Results Submitted' : s3_status === 'warning' ? 'Reassigned – Corrections Needed' : 'Analysis in Progress', status: s3_status, date: s3_date, user: instance ? `${instance.assignedTo?.name} (Analyst)` : 'Pending Analyst' },
-        { id: 4, title: 'Dept Head Review', desc: isDeptCompleted ? 'Report Generated' : isReopened ? 'Archived (Reopened)' : s4_status === 'active' ? 'Awaiting Dept Head Approval' : 'Pending Submission', status: s4_status, date: instance?.completedAt || headApproval?.date, user: instance ? `${instance.createdBy?.name} (${title.split(' ')[0]} Head)` : (distData?.assignedHead?.name ? `${distData.assignedHead.name} (Pending)` : 'Pending Dept Head') }
+        { id: 1, title: isRetest ? 'Retest Allocation' : 'Job Allocation', desc: 'Allocated by Admin Officer', status: s1_status, date: cycleJob.createdAt, user: `${cycleJob.createdBy?.name || 'Admin Officer'}` },
+        { id: 2, title: 'Analyst Dispatch', desc: s2_status === 'warning' ? 'Returned to Admin Officer' : (instance ? `Code: ${formatJobCode(instance.testCode)}` : 'Awaiting Dept Head Dispatch'), status: s2_status, date: instance?.createdAt, user: instance ? `${instance.createdBy?.name}` : (distData?.assignedHead?.name ? `${distData.assignedHead.name} (Pending)` : 'Pending Dept Head') },
+        { id: 3, title: 'Test Execution', desc: s3_desc, status: s3_status, date: s3_date, user: step3User, detail: step3Detail },
+        { id: 4, title: 'Dept Head Review', desc: isDeptCompleted ? 'Report Generated' : isReopened ? 'Archived (Reopened)' : s4_status === 'active' ? 'Awaiting Dept Head Approval' : 'Pending Submission', status: s4_status, date: instance?.completedAt || headApproval?.date, user: instance ? `${instance.createdBy?.name}` : (distData?.assignedHead?.name ? `${distData.assignedHead.name} (Pending)` : 'Pending Dept Head') }
       ];
 
       return (
@@ -158,7 +219,21 @@ export default function JobTimeline({ job, allJobs = [], onReopen }) {
                   </div>
                   <div className="timeline-step-content" style={{ paddingBottom: idx < steps.length - 1 ? '1.25rem' : '0', flex: 1, marginTop: '2px' }}>
                     <div className="timeline-step-title" style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--color-text-main)' }}>{step.title}</div>
-                    <div className="timeline-step-desc" style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginBottom: '0.3rem' }}>{step.desc}</div>
+                    <div className="timeline-step-desc" style={{ fontSize: '0.78rem', color: step.status === 'warning' ? '#B45309' : 'var(--color-text-muted)', marginBottom: '0.3rem' }}>{step.desc}</div>
+                    {step.detail && (
+                      <div style={{
+                        fontSize: '0.75rem',
+                        color: 'var(--color-text-muted)',
+                        backgroundColor: '#FFFBEB',
+                        border: '1px solid #FDE68A',
+                        borderRadius: '4px',
+                        padding: '0.25rem 0.5rem',
+                        marginBottom: '0.3rem',
+                        lineHeight: 1.4,
+                      }}>
+                        {step.detail}
+                      </div>
+                    )}
                     {(isDone || isActive) && (
                       <div className="timeline-meta" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
                         {step.user && (
@@ -219,91 +294,79 @@ export default function JobTimeline({ job, allJobs = [], onReopen }) {
 
         {/* Pipeline tracks — scrollable on mobile */}
         <div className="pipeline-scroll">
-        <div className="pipeline-container" style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', alignItems: 'stretch' }}>
-          {cycleJob.sampleFlow?.firstDepartment === 'chemical' ? (
-            <>
-              {(user?.role !== 'HEAD' || user?.department?.toLowerCase() === 'chemical' || user?.department?.toLowerCase() === 'chemical') && (
-                <PipelineTrack title="CHEMICAL Department" distData={cycleJob.distribution?.chemical} instance={chemicalInstance} deptColor="#3B82F6" richInstance={richChemical} />
-              )}
-              {user?.role !== 'HEAD' && bothRequired && cycleJob.sampleTransfers && cycleJob.sampleTransfers.length > 0 && (
-                <div className="timeline-transfer" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flex: 1, minWidth: '150px', boxSizing: 'border-box' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.6rem', padding: '1.25rem 1rem', backgroundColor: 'var(--color-surface-hover)', borderRadius: '12px', border: '1px dashed var(--color-border)', width: '100%', height: '100%', justifyContent: 'center', boxSizing: 'border-box' }}>
-                    <ArrowRightLeft size={28} style={{ color: cycleJob.sampleTransfers[0].status === 'RECEIVED' ? 'var(--color-success)' : 'var(--color-warning)' }} />
-                    <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--color-text-main)' }}>
-                      Sample Transfer
-                    </div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', textAlign: 'center' }}>
-                      {cycleJob.sampleTransfers[0].status === 'RECEIVED' 
-                        ? `Received by ${cycleJob.sampleTransfers[0].receivedBy?.name?.split(' ')[0] || 'Dept'}` 
-                        : `In Transit`}
-                    </div>
-                    {cycleJob.sampleTransfers[0].sentAt && (
-                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.2rem', textAlign: 'center' }}>
-                        Sent: {new Date(cycleJob.sampleTransfers[0].sentAt).toLocaleString('en-IN', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hour12: true })}
+          <div className="pipeline-container" style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', alignItems: 'stretch' }}>
+            {cycleJob.sampleFlow?.firstDepartment === 'chemical' ? (
+              <>
+                {(user?.role !== 'HEAD' || user?.department?.toLowerCase() === 'chemical' || user?.department?.toLowerCase() === 'chemical') && (
+                  <PipelineTrack title="CHEMICAL Department" distData={cycleJob.distribution?.chemical} instance={chemicalInstance} deptColor="#3B82F6" richInstance={richChemical} />
+                )}
+                {user?.role !== 'HEAD' && bothRequired && cycleJob.sampleTransfers && cycleJob.sampleTransfers.length > 0 && (
+                  <div className="timeline-transfer" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flex: 1, minWidth: '150px', boxSizing: 'border-box' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.6rem', padding: '1.25rem 1rem', backgroundColor: 'var(--color-surface-hover)', borderRadius: '12px', border: '1px dashed var(--color-border)', width: '100%', height: '100%', justifyContent: 'center', boxSizing: 'border-box' }}>
+                      <ArrowRightLeft size={28} style={{ color: cycleJob.sampleTransfers[0].status === 'RECEIVED' ? 'var(--color-success)' : 'var(--color-warning)' }} />
+                      <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--color-text-main)' }}>
+                        Sample Transfer
                       </div>
-                    )}
-                    {cycleJob.sampleTransfers[0].receivedAt && (
-                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', textAlign: 'center' }}>
-                        Received: {new Date(cycleJob.sampleTransfers[0].receivedAt).toLocaleString('en-IN', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hour12: true })}
+                      <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', textAlign: 'center' }}>
+                        {cycleJob.sampleTransfers[0].status === 'RECEIVED'
+                          ? `Received by ${cycleJob.sampleTransfers[0].receivedBy?.name?.split(' ')[0] || 'Dept'}`
+                          : `In Transit`}
                       </div>
-                    )}
+                      {cycleJob.sampleTransfers[0].sentAt && (
+                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.2rem', textAlign: 'center' }}>
+                          Sent: {new Date(cycleJob.sampleTransfers[0].sentAt).toLocaleString('en-IN', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hour12: true })}
+                        </div>
+                      )}
+                      {cycleJob.sampleTransfers[0].receivedAt && (
+                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', textAlign: 'center' }}>
+                          Received: {new Date(cycleJob.sampleTransfers[0].receivedAt).toLocaleString('en-IN', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hour12: true })}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
-              {(user?.role !== 'HEAD' || user?.department?.toLowerCase() === 'micro') && (
-                <PipelineTrack title="MICRO Department" distData={cycleJob.distribution?.micro} instance={microInstance} deptColor="#10B981" richInstance={richMicro} />
-              )}
-            </>
-          ) : (
-            <>
-              {(user?.role !== 'HEAD' || user?.department?.toLowerCase() === 'micro') && (
-                <PipelineTrack title="MICRO Department" distData={cycleJob.distribution?.micro} instance={microInstance} deptColor="#10B981" richInstance={richMicro} />
-              )}
-              {user?.role !== 'HEAD' && bothRequired && cycleJob.sampleTransfers && cycleJob.sampleTransfers.length > 0 && (
-                <div className="timeline-transfer" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flex: 1, minWidth: '150px', boxSizing: 'border-box' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.6rem', padding: '1.25rem 1rem', backgroundColor: 'var(--color-surface-hover)', borderRadius: '12px', border: '1px dashed var(--color-border)', width: '100%', height: '100%', justifyContent: 'center', boxSizing: 'border-box' }}>
-                    <ArrowRightLeft size={28} style={{ color: cycleJob.sampleTransfers[0].status === 'RECEIVED' ? 'var(--color-success)' : 'var(--color-warning)' }} />
-                    <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--color-text-main)' }}>
-                      Sample Transfer
-                    </div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', textAlign: 'center' }}>
-                      {cycleJob.sampleTransfers[0].status === 'RECEIVED' 
-                        ? `Received by ${cycleJob.sampleTransfers[0].receivedBy?.name?.split(' ')[0] || 'Dept'}` 
-                        : `In Transit`}
-                    </div>
-                    {cycleJob.sampleTransfers[0].sentAt && (
-                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.2rem', textAlign: 'center' }}>
-                        Sent: {new Date(cycleJob.sampleTransfers[0].sentAt).toLocaleString('en-IN', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hour12: true })}
+                )}
+                {(user?.role !== 'HEAD' || user?.department?.toLowerCase() === 'micro') && (
+                  <PipelineTrack title="MICRO Department" distData={cycleJob.distribution?.micro} instance={microInstance} deptColor="#10B981" richInstance={richMicro} />
+                )}
+              </>
+            ) : (
+              <>
+                {(user?.role !== 'HEAD' || user?.department?.toLowerCase() === 'micro') && (
+                  <PipelineTrack title="MICRO Department" distData={cycleJob.distribution?.micro} instance={microInstance} deptColor="#10B981" richInstance={richMicro} />
+                )}
+                {user?.role !== 'HEAD' && bothRequired && cycleJob.sampleTransfers && cycleJob.sampleTransfers.length > 0 && (
+                  <div className="timeline-transfer" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', flex: 1, minWidth: '150px', boxSizing: 'border-box' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.6rem', padding: '1.25rem 1rem', backgroundColor: 'var(--color-surface-hover)', borderRadius: '12px', border: '1px dashed var(--color-border)', width: '100%', height: '100%', justifyContent: 'center', boxSizing: 'border-box' }}>
+                      <ArrowRightLeft size={28} style={{ color: cycleJob.sampleTransfers[0].status === 'RECEIVED' ? 'var(--color-success)' : 'var(--color-warning)' }} />
+                      <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--color-text-main)' }}>
+                        Sample Transfer
                       </div>
-                    )}
-                    {cycleJob.sampleTransfers[0].receivedAt && (
-                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', textAlign: 'center' }}>
-                        Received: {new Date(cycleJob.sampleTransfers[0].receivedAt).toLocaleString('en-IN', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hour12: true })}
+                      <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', textAlign: 'center' }}>
+                        {cycleJob.sampleTransfers[0].status === 'RECEIVED'
+                          ? `Received by ${cycleJob.sampleTransfers[0].receivedBy?.name?.split(' ')[0] || 'Dept'}`
+                          : `In Transit`}
                       </div>
-                    )}
+                      {cycleJob.sampleTransfers[0].sentAt && (
+                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.2rem', textAlign: 'center' }}>
+                          Sent: {new Date(cycleJob.sampleTransfers[0].sentAt).toLocaleString('en-IN', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hour12: true })}
+                        </div>
+                      )}
+                      {cycleJob.sampleTransfers[0].receivedAt && (
+                        <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', textAlign: 'center' }}>
+                          Received: {new Date(cycleJob.sampleTransfers[0].receivedAt).toLocaleString('en-IN', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', hour12: true })}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
-              {(user?.role !== 'HEAD' || user?.department?.toLowerCase() === 'chemical' || user?.department?.toLowerCase() === 'chemical') && (
-                <PipelineTrack title="CHEMICAL Department" distData={cycleJob.distribution?.chemical} instance={chemicalInstance} deptColor="#3B82F6" richInstance={richChemical} />
-              )}
-            </>
-          )}
-        </div>
+                )}
+                {(user?.role !== 'HEAD' || user?.department?.toLowerCase() === 'chemical' || user?.department?.toLowerCase() === 'chemical') && (
+                  <PipelineTrack title="CHEMICAL Department" distData={cycleJob.distribution?.chemical} instance={chemicalInstance} deptColor="#3B82F6" richInstance={richChemical} />
+                )}
+              </>
+            )}
+          </div>
         </div>{/* end pipeline-scroll */}
 
-        {/* Bottom report bar — when all done */}
-        {allDone && (
-          <div style={{ marginTop: '1.25rem', padding: '1rem 1.5rem', backgroundColor: '#F0FDF4', borderRadius: '10px', border: '1px solid #D1FAE5', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-              <CheckCircle size={20} color="#10B981" />
-              <div>
-                <div style={{ fontWeight: 600, color: '#065F46', fontSize: '0.9rem' }}>All analyses complete for {formatJobCode(cycleJob.jobCode)}</div>
-                <div style={{ fontSize: '0.78rem', color: '#6EE7B7' }}>Report available in actions menu</div>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     );
   };
