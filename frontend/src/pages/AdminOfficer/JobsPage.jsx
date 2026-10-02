@@ -7,10 +7,11 @@ import API_URL from "../../utils/api";
 import { BLANK_FORM } from "../../utils/formUtils";
 import Spinner from "../../components/Spinner";
 
-import { 
-  Play, Plus, Check, Clock, Edit, FileText, XCircle, Search, LogOut, ChevronDown, 
+import {
+  Play, Plus, Check, Clock, Edit, FileText, XCircle, Search, LogOut, ChevronDown,
   ChevronRight, ArrowLeft, Download, Eye, LayoutDashboard, Users, Activity, AlertTriangle, RefreshCw, X, Shield,
-  Calendar, Repeat2, PauseCircle } from "lucide-react";
+  Calendar, Repeat2, PauseCircle
+} from "lucide-react";
 import JobLogTable from "../../components/JobLogTable";
 import InfiniteScroll from "../../components/InfiniteScroll";
 import { useSocket } from "../../context/SocketContext";
@@ -49,7 +50,7 @@ export default function Jobs() {
   const [hasMoreJobs, setHasMoreJobs] = useState(false);
   const [jobsCursor, setJobsCursor] = useState(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  
+
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState(() => {
     const saved = sessionStorage.getItem("DRAFT_JOB_FORM");
@@ -364,6 +365,8 @@ export default function Jobs() {
   useEffect(() => {
     if (formData.nabl_mode === "nabl" || formData.nabl_mode === "hybrid") {
       fetchUlrPreview();
+    } else {
+      setUlrPreview("");
     }
   }, [formData.nabl_mode]);
 
@@ -513,7 +516,7 @@ export default function Jobs() {
           setNablShowSpecifications(!!j.showSpecifications);
           setNablGroupMetadata(j.groupMetadata || null);
           setNablPesticidePanel(j.pesticidePanel || { enabled: false, panelType: null });
-          
+
           setNonNablParams(mapParams(sib.parameters));
           setNonNablShowSpecifications(!!sib.showSpecifications);
           setNonNablGroupMetadata(sib.groupMetadata || null);
@@ -523,7 +526,7 @@ export default function Jobs() {
           setNonNablShowSpecifications(!!j.showSpecifications);
           setNonNablGroupMetadata(j.groupMetadata || null);
           setNonNablPesticidePanel(j.pesticidePanel || { enabled: false, panelType: null });
-          
+
           setNablParams(mapParams(sib.parameters));
           setNablShowSpecifications(!!sib.showSpecifications);
           setNablGroupMetadata(sib.groupMetadata || null);
@@ -538,7 +541,7 @@ export default function Jobs() {
       setNablShowSpecifications(!!j.showSpecifications);
       setNablGroupMetadata(j.groupMetadata || null);
       setNablPesticidePanel(j.pesticidePanel || { enabled: false, panelType: null });
-      
+
       setNonNablParams(mapParams(j.parameters));
       setNonNablShowSpecifications(!!j.showSpecifications);
       setNonNablGroupMetadata(j.groupMetadata || null);
@@ -1999,7 +2002,7 @@ export default function Jobs() {
                         {(() => {
                           const ulrIsLocked = !!(editingJobId && formData.ulr_no && formData.ulr_no !== 'N/A');
                           const isNonNablHybridSibling = !!(editingJobId && formData.jobCode?.includes('-N'));
-                          
+
                           if (ulrIsLocked) {
                             return (
                               <div style={{ marginBottom: '1.5rem', padding: '1rem', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
@@ -2012,12 +2015,12 @@ export default function Jobs() {
                             return (
                               <div style={{ marginBottom: "1.5rem", backgroundColor: "#eff6ff", padding: "1rem", borderRadius: "var(--radius-md)", border: "1px solid #bfdbfe" }}>
                                 <label style={{ display: "block", marginBottom: "0.4rem", fontWeight: 600, fontSize: "0.9rem", color: "#1e3a8a" }}>
-                                  ULR Number {editingJobId ? '' : '(Auto-assigned)'} <span style={{ color: "var(--color-danger)" }}>*</span>
+                                  ULR Number <span style={{ color: "var(--color-danger)" }}>*</span>
                                 </label>
-                                <input value={editingJobId ? (formData.ulr_no || 'N/A') : ulrPreview} readOnly style={{ width: "100%", backgroundColor: "transparent", border: "1px solid #93c5fd", color: "#1e40af", fontWeight: 700, letterSpacing: "0.05em" }} />
+                                <input value={editingJobId ? (formData.ulr_no || 'N/A') : (ulrPreview ? `~ ${ulrPreview}` : 'Loading…')} readOnly style={{ width: "100%", backgroundColor: "transparent", border: "1px solid #93c5fd", color: "#1e40af", fontWeight: 700, letterSpacing: "0.05em" }} />
                                 {!editingJobId && (
-                                  <div style={{ fontSize: "0.75rem", color: "#3b82f6", marginTop: "0.4rem" }}>
-                                    This ULR will be officially assigned when the job is submitted.
+                                  <div style={{ fontSize: "0.75rem", color: "#6b7280", marginTop: "0.4rem" }}>
+                                    The number shown here is an estimate.
                                   </div>
                                 )}
                               </div>
@@ -2113,7 +2116,7 @@ export default function Jobs() {
                                           // Fetch recent ULRs for reference
                                           axios.get(`${API_URL}/api/jobs/recent-ulrs`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
                                             .then(r => setRecentUlrs(r.data))
-                                            .catch(() => {});
+                                            .catch(() => { });
                                         }}
                                         style={{
                                           padding: '0.3rem 0.9rem',
@@ -2146,7 +2149,7 @@ export default function Jobs() {
                                           color: '#1e40af',
                                           letterSpacing: '0.04em',
                                         }}>
-                                          {ulrPreview || '—'}
+                                          {'—'}
                                         </div>
                                         <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.5rem' }}>
                                           A slot is reserved on save. The final ULR is built on Head Approval.

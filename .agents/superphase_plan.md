@@ -290,8 +290,26 @@ Full flow tested: Diksha had [Iodine, Moisture, Refractive]. HEAD split Refracti
 - **Bug A (Image 1/2/3)**: Refractive Index still appeared on Diksha's analyst card as "Approved" and in HEAD's review as an empty row after it was sent to Vishal. Root cause: Branch 1 was **wiping** params in-place (`value: '', isSaved: false`) but leaving them in `instance.results`. The frontend shows any result not in `retestOnly` as Approved — the wiped Refractive was not in retestOnly, so it showed as Approved. HEAD's review shows all entries in `results`, so the empty row appeared there too. Fix: use `filter()` then `map()` in Branch 1 — same as Branch 2.
 - **Bug B (Image 5)**: Moisture appeared as "Approved" on Vishal's card after being merged in. Root cause: Vishal's sub-instance was created with `retestOnly = [refractive_id]` (from prior split). When Moisture was merged, the condition `status === PENDING_HEAD_REVIEW` was false (Vishal was PENDING), so Moisture was not added to `retestOnly`. Frontend: anything not in a non-empty `retestOnly` shows as Approved → Moisture showed as Approved. Fix: add to retestOnly if `status === PENDING_HEAD_REVIEW` **OR** `retestOnly.length > 0` (i.e., the instance was already scoped by a prior split).
 
-> ✅ Completed (Pass 3). `backend/routes/tests/testResultRoutes.js`: Branch 1 changed from wipe-map to filter+map; merge block retestOnly condition extended to `PENDING_HEAD_REVIEW || retestOnly.length > 0`.
+**Regression found during testing (Pass 4 — multi-analyst dispatch flow):**
 
+Full flow tested: Om Prakash had 5 params. HEAD selective-reassigned 2 → Vishal, 2 → Diksha, 1 stayed with Om. Diksha submitted. HEAD reassigned 1 of Diksha's params to Vishal.
+
+- **Bug C — Junk test code suffix**: When an analyst had NO existing instance (Diksha in this case), the "create" path was generating a random timestamp suffix (`2608041697-2a-R9ob0`) instead of following the established `-2b`, `-2c` convention. Fix: strip the trailing letter from the parent's `testCode` to get the dept-base (`2608041697-2`), count existing instances matching that pattern, and use `String.fromCharCode(97 + count)` to get the next letter. Sequential, deterministic, matches dispatch conventions.
+- **Bug D — Double-hash login failure**: Om Prakash's account couldn't log in on both local and prod. Root cause: a manual password reset script had called `bcrypt.hash()` explicitly and then `.save()`, causing the Mongoose `pre('save')` hook to hash the already-hashed value a second time. Fix: pass plain text password to the model and let the hook hash it once.
+- **UX — Review history labels**: `REASSIGN_MERGED` action was displayed raw in the Previous Review History box. Fixed: added `ACTION_LABELS` map in `ReviewQueuePage.jsx`, `REASSIGN_MERGED` → "Parameters added via reassign:" with the note flowing inline (no em-dash). Backend note updated to `"N Parameter(s) added from {jobCode}"` with proper singular/plural and suffix stripped.
+
+**Design decisions locked:**
+- **Wipe on reassign**: When params are sent from analyst A to analyst B, values are fully wiped (`value: ''`, `testMethod: ''`, `isSaved: false`). B must independently re-test and enter fresh results. Previous values are stored in `instance.previousResults` for HEAD's audit trail only. This prevents Diksha's numbers from silently passing through as B's results.
+
+> ✅ **FULLY RESOLVED** (Pass 4). All paths confirmed working:
+> - Branch 1 (A retains some params, some go to B): filter+map, removes params sent away, A stays PENDING
+> - Branch 2 (all of A's params go to B): filter, A stays PENDING_HEAD_REVIEW (or COMPLETED if empty)  
+> - Merge into existing PENDING instance (retestOnly=[]): new params added, retestOnly untouched — all editable
+> - Merge into existing sub-instance (retestOnly non-empty): new params added to retestOnly — all editable
+> - Merge into PENDING_HEAD_REVIEW instance: new params added to retestOnly — submitted work stays Approved
+> - No existing instance: new sub-instance created with clean letter suffix (`-2b`, `-2c`, etc.)
+>
+> Files changed: `backend/routes/tests/testResultRoutes.js`, `backend/models/TestInstance.js`, `frontend/src/pages/Head/ReviewQueuePage.jsx`
 
 
 ---

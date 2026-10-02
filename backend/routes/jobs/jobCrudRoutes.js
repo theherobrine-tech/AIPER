@@ -66,6 +66,10 @@ router.get('/next-ulr', protect, async (req, res) => {
     const yy = String(new Date().getFullYear()).slice(2);
     const numStr = String(counter.currentValue).padStart(8, '0');
     const nextNumStr = String(counter.currentValue + 1).padStart(8, '0');
+    // NOTE: In-flight NABL jobs do not increment currentValue at creation — they
+    // increment at Head Approval. If multiple NABL jobs are completing concurrently,
+    // the actual assigned ULR may differ from this preview by 1 or more. The preview
+    // is labelled as an estimate in the UI.
     res.json({
       lastUlr: `${counter.prefix}${yy}${numStr}`,
       nextUlr: `${counter.prefix}${yy}${nextNumStr}`,
