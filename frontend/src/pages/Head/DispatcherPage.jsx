@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from "react";
+import React, { useState, useEffect, useContext, useMemo } from "react";
 import axios from "axios";
 import { useLocation, useNavigate } from "react-router-dom";
 import { fetchWithCache, invalidateCache, CACHE_KEYS, isCached } from "../../utils/cache";
@@ -18,6 +18,10 @@ import { formatDate } from "../../utils/dateUtils";
 import InfiniteScroll from "../../components/InfiniteScroll";
 import JobDetailsModal from "../../components/JobDetailsModal";
 import AssignmentHistory from "../../components/AssignmentHistory";
+import Fuse from "fuse.js";
+import PageHeader from "../../components/PageHeader";
+import { useListControls } from "../../hooks/useListControls";
+import { jobCodeComparator } from "../../utils/siblingUtils";
 
 const isOverdue = (deadlineStr) => {
   if (!deadlineStr) return false;
@@ -76,7 +80,92 @@ export default function Dispatcher() {
   const [isReturning, setIsReturning] = useState(false);
   const [detailsJob, setDetailsJob] = useState(null);
 
-  // Sample transfer state
+  // --- Search: full-dataset for Fuse ---
+  const [allJobs, setAllJobs] = useState([]);
+  const [allJobsLoaded, setAllJobsLoaded] = useState(false);
+  const [isLoadingAllJobs, setIsLoadingAllJobs] = useState(false);
+
+  const searchableJobs = useMemo(() =>
+    allJobs.map(job => ({
+      ...job,
+      _paramNames: (job.parameters || []).map(p => p.name || '').join(' '),
+    })),
+  [allJobs]);
+
+  const dispatcherFuse = useMemo(() => new Fuse(searchableJobs, {
+    keys: ['jobCode', 'clientName', '_paramNames'],
+    threshold: 0.35,
+    ignoreLocation: true,
+  }), [searchableJobs]);
+
+  const dispatcherFilterDefs = [
+    {
+      id: 'dispatchLocked',
+      label: 'Dispatch Locked',
+      type: 'toggle',
+      test: (job) => {
+        const dept = user?.department?.toLowerCase();
+        const dist = job.distribution?.[dept];
+        return dist?.status === 'PENDING_REVIEW';
+      },
+    },
+    {
+      id: 'pendingApproval',
+      label: 'Pending Approval',
+      type: 'toggle',
+      test: (job) => {
+        const dept = user?.department?.toLowerCase();
+        const dist = job.distribution?.[dept];
+        return dist?.status === 'REVIEW_APPROVED';
+      },
+    },
+    {
+      id: 'pendingOtherDept',
+      label: 'Pending Other Dept',
+      type: 'toggle',
+      test: (job) => {
+        const myDept = user?.department?.toLowerCase();
+        const otherDept = myDept === 'micro' ? 'chemical' : 'micro';
+        const otherDist = job.distribution?.[otherDept];
+        return otherDist?.required && otherDist?.status === 'PENDING';
+      },
+    },
+  ];
+
+  const dispatcherSortConfig = {
+    defaultSortKey: 'createdAt',
+    defaultSortDir: 'desc',
+    sortOptions: [
+      { key: 'createdAt', label: 'Date Received' },
+      { key: 'jobCode',   label: 'Job Code' },
+    ],
+    filterDefs: dispatcherFilterDefs,
+  };
+
+  const dispatcherControls = useListControls(
+    jobs,
+    dispatcherSortConfig,
+    {
+      getSiblingId: (job) => job.siblingJobId || null,
+      fullItems: jobs,
+      fuse: dispatcherFuse,
+    }
+  );
+
+  // Fetch all jobs when search is first activated
+  useEffect(() => {
+    if (dispatcherControls.searchQuery && !allJobsLoaded && !isLoadingAllJobs) {
+      setIsLoadingAllJobs(true);
+      axios.get(`${API_URL}/api/jobs?activeForHead=true&limit=1000`)
+        .then(res => {
+          const list = filterActiveHeadJobs(res.data.jobs || res.data);
+          setAllJobs(list);
+          setAllJobsLoaded(true);
+        })
+        .catch(console.error)
+        .finally(() => setIsLoadingAllJobs(false));
+    }
+  }, [dispatcherControls.searchQuery]);
 
   const filterActiveHeadJobs = (dataArray) => {
     const dept = user?.department ? user.department.toLowerCase() : "";
@@ -424,6 +513,16 @@ export default function Dispatcher() {
       {/* ── Sample Transfers Section ── */}
       <TransferManagement />
 
+      {/* ── Page Header (search / sort / filter) ── */}
+      {!dispatchLoading && jobs.length > 0 && (
+        <PageHeader
+          config={dispatcherSortConfig}
+          controls={dispatcherControls}
+          onSearchChange={dispatcherControls.setSearchQuery}
+          resultCount={dispatcherControls.processedItems.length}
+          totalCount={jobs.length}
+        />
+      )}
 
       {dispatchLoading && jobs.length === 0 ? (
         <div className="card"><Spinner message="Loading pending jobs..." /></div>
@@ -449,7 +548,7 @@ export default function Dispatcher() {
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: "1rem", paddingBottom: selectedJobIds.size >= 2 ? "120px" : "0" }}>
-          {jobs.map((job) => {
+          {dispatcherControls.processedItems.map((job) => {
             const deptParams = getDeptParams(job);
             const isExpanded = expandedJobId === job._id;
             const microCount = deptParams.filter(
@@ -1596,7 +1695,7 @@ export default function Dispatcher() {
         </div>
       )}
 
-      <InfiniteScroll hasMore={hasMoreJobs} isLoading={isLoadingMore} onLoadMore={loadMoreJobs} />
+      <InfiniteScroll hasMore={!dispatcherControls.searchQuery && hasMoreJobs} isLoading={isLoadingMore} onLoadMore={loadMoreJobs} />
     </div>
   );
 }

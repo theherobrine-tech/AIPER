@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from "react";
+import React, { useState, useEffect, useContext, useMemo } from "react";
 import axios from "axios";
 import { useLocation, useNavigate } from "react-router-dom";
 import { fetchWithCache, invalidateCache, CACHE_KEYS, isCached } from "../../utils/cache";
@@ -14,6 +14,11 @@ import {
 import { useSocket } from "../../context/SocketContext";
 import { AuthContext } from "../../context/AuthContext";
 import { formatJobCode } from "../../utils/serialUtils";
+import Fuse from "fuse.js";
+import InfiniteScroll from "../../components/InfiniteScroll";
+import PageHeader from "../../components/PageHeader";
+import { useListControls } from "../../hooks/useListControls";
+import { testCodeRoot } from "../../utils/siblingUtils";
 
 export default function ReviewQueue() {
   const { user } = useContext(AuthContext);
@@ -28,6 +33,18 @@ export default function ReviewQueue() {
   const [assistants, setAssistants] = useState([]);
   const [submittingReviewId, setSubmittingReviewId] = useState(null);
 
+  // Infinite scroll state (two-tier, mirrors JobLogTable pattern)
+  const [hasMoreInstances, setHasMoreInstances] = useState(false);
+  const [instancesCursor, setInstancesCursor] = useState(null);
+  const [isLoadingMoreInstances, setIsLoadingMoreInstances] = useState(false);
+  const [instancesPage, setInstancesPage] = useState(1);
+  const PAGE_SIZE = 20;
+
+  // Full dataset for search (loaded once on first search activation)
+  const [allInstances, setAllInstances] = useState([]);
+  const [allInstancesLoaded, setAllInstancesLoaded] = useState(false);
+  const [isLoadingAllInstances, setIsLoadingAllInstances] = useState(false);
+
   // Selective reassignment state: { [parameterId]: { selected: bool, assignedTo: userId } }
   const [paramSelections, setParamSelections] = useState({});
 
@@ -36,13 +53,37 @@ export default function ReviewQueue() {
       await fetchWithCache(
         `${API_URL}/api/tests/instances`,
         CACHE_KEYS.INSTANCES,
-        (data) =>
-          setInstances(data.filter((i) => i.status === "PENDING_HEAD_REVIEW")),
+        (data) => {
+          // Handle both old array shape and new paginated shape
+          const list = data.instances || data;
+          setInstances(Array.isArray(list) ? list.filter((i) => i.status === "PENDING_HEAD_REVIEW") : []);
+          if (data.hasMore !== undefined) {
+            setHasMoreInstances(data.hasMore);
+            setInstancesCursor(data.nextCursor || null);
+          }
+          setInstancesPage(1);
+        },
       );
     } catch (err) {
       console.error(err);
     } finally {
       setReviewLoading(false);
+    }
+  };
+
+  const loadMoreInstances = async () => {
+    if (!instancesCursor || isLoadingMoreInstances) return;
+    setIsLoadingMoreInstances(true);
+    try {
+      const res = await axios.get(`${API_URL}/api/tests/instances?cursor=${instancesCursor}`);
+      const newList = (res.data.instances || []).filter((i) => i.status === "PENDING_HEAD_REVIEW");
+      setInstances((prev) => [...prev, ...newList]);
+      setHasMoreInstances(res.data.hasMore);
+      setInstancesCursor(res.data.nextCursor);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoadingMoreInstances(false);
     }
   };
 
@@ -79,6 +120,22 @@ export default function ReviewQueue() {
       socket.off("JOB_UPDATED", refresh);
     };
   }, [socket]);
+
+  // Fetch all instances on first search activation
+  useEffect(() => {
+    if (reviewControls?.searchQuery && !allInstancesLoaded && !isLoadingAllInstances) {
+      setIsLoadingAllInstances(true);
+      axios.get(`${API_URL}/api/tests/instances?limit=1000`)
+        .then((res) => {
+          const list = (res.data.instances || res.data).filter((i) => i.status === "PENDING_HEAD_REVIEW");
+          setAllInstances(list);
+          setAllInstancesLoaded(true);
+        })
+        .catch(console.error)
+        .finally(() => setIsLoadingAllInstances(false));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewControls?.searchQuery]);
 
   const handleApprove = async (id) => {
     setSubmittingReviewId(id);
@@ -200,6 +257,86 @@ export default function ReviewQueue() {
     (v) => v.selected,
   ).length;
 
+  // --- Review Queue search + sort + filter controls ---
+  const searchableInstances = useMemo(() =>
+    allInstances.map((inst) => ({
+      ...inst,
+      _paramNames: (inst.results || []).map((r) => r.name || '').join(' '),
+    })),
+  [allInstances]);
+
+  const reviewFuse = useMemo(() => new Fuse(searchableInstances, {
+    keys: ['testCode', 'clientName', '_paramNames'],
+    threshold: 0.35,
+    ignoreLocation: true,
+  }), [searchableInstances]);
+
+  const reviewFilterDefs = [
+    {
+      id: 'analyst',
+      label: 'Analyst',
+      type: 'select',
+      test: (inst, value) => {
+        const analystId = inst.assignedTo?._id || inst.assignedTo;
+        return String(analystId) === String(value);
+      },
+    },
+    {
+      id: 'dateRange',
+      label: 'Date Range',
+      type: 'dateRange',
+      test: (inst, { from, to }) => {
+        const d = new Date(inst.createdAt);
+        if (from && d < new Date(from)) return false;
+        if (to && d > new Date(to + 'T23:59:59')) return false;
+        return true;
+      },
+    },
+  ];
+
+  const reviewSortConfig = {
+    defaultSortKey: 'createdAt',
+    defaultSortDir: 'desc',
+    sortOptions: [
+      { key: 'createdAt', label: 'Date Received' },
+      { key: 'testCode',  label: 'Job Code' },
+    ],
+    filterDefs: reviewFilterDefs,
+  };
+
+  // rawItems: when search active use allInstances (Fuse handles it via hook option); otherwise scroll slice
+  const reviewControls = useListControls(
+    instances,
+    reviewSortConfig,
+    {
+      groupRoots: (inst) => testCodeRoot(inst.testCode),
+      fullItems: allInstances.length > 0 ? allInstances : instances,
+      fuse: reviewFuse,
+    }
+  );
+
+  // Two-tier load more (mirrors JobLogTable.handleLoadMore)
+  const totalInstancePages = Math.ceil(reviewControls.processedItems.length / PAGE_SIZE);
+  const visibleInstances = reviewControls.processedItems.slice(0, instancesPage * PAGE_SIZE);
+
+  const handleLoadMoreInstances = () => {
+    if (instancesPage < totalInstancePages) {
+      setInstancesPage((p) => p + 1);
+      // Proactive pre-fetch: fire network request when on last local page
+      if (instancesPage + 1 >= totalInstancePages && hasMoreInstances && !isLoadingMoreInstances) {
+        loadMoreInstances();
+      }
+    } else if (hasMoreInstances && !isLoadingMoreInstances) {
+      loadMoreInstances();
+      setInstancesPage((p) => p + 1);
+    }
+  };
+
+  // Reset local page when controls change
+  useEffect(() => {
+    setInstancesPage(1);
+  }, [reviewControls.searchQuery, reviewControls.sortKey, reviewControls.sortDir, reviewControls.activeFilters]);
+
   return (
     <div>
       <h1
@@ -256,7 +393,18 @@ export default function ReviewQueue() {
         <div
           style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}
         >
-          {instances.map((inst) => {
+          <PageHeader
+            config={reviewSortConfig}
+            controls={reviewControls}
+            onSearchChange={reviewControls.setSearchQuery}
+            resultCount={reviewControls.processedItems.length}
+            totalCount={instances.length}
+            filterSelectOptions={{
+              analyst: assistants.map((a) => ({ value: a._id, label: a.name }))
+            }}
+          />
+
+          {visibleInstances.map((inst) => {
             const isReassignMode = showReassignForm === inst._id;
 
             return (
@@ -732,6 +880,11 @@ export default function ReviewQueue() {
               </div>
             );
           })}
+          <InfiniteScroll
+            hasMore={!reviewControls.searchQuery && (instancesPage < totalInstancePages || hasMoreInstances)}
+            isLoading={isLoadingMoreInstances}
+            onLoadMore={handleLoadMoreInstances}
+          />
         </div>
       )}
     </div>

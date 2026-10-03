@@ -365,6 +365,66 @@ Full flow tested: Om Prakash had 5 params. HEAD selective-reassigned 2 → Visha
 
 ---
 
+### SP2.P6 — F2: Head Pages — Search, Filter & Sort
+
+**Scope**: Dispatcher page + Review Queue page. Infrastructure also wired to Admin Officer Job Distributor, upcoming Head page, and Activity Logs (each in its own subphase).
+
+**Bug fixed in this phase**: Review Queue was sorting jobs opposite to Dispatcher — inconsistency resolved by applying the same default sort (descending by `createdAt`) to both pages.
+
+**Design decisions locked (from /grill-me session):**
+- Single `<PageHeader>` component (`components/PageHeader.jsx`) driven by a per-page config prop
+- Filter/sort state lives in `useListControls` custom hook (`hooks/useListControls.js`)
+- Header is **sticky** (fixed while scrolling); editing any control scrolls user back to top
+- Filter/sort panels: **inline dropdowns** (no modal); active filters shown as **dismissible chips** below the header (large enough to tap on mobile)
+- Multiple active filters are **AND logic** (job must match all)
+- **"Clear All"** button in header resets search + all filters + sort to defaults at once
+- Result count shown in header whenever search or filter is active: `"Showing X of Y jobs"`
+- Search: **live as-you-type** (debounced 300ms); single field matching all relevant fields simultaneously; uses Fuse.js (same pattern as CommandPalette)
+- Search on Dispatcher fetches all jobs once (ignores cursor/infinite scroll); normal browsing keeps infinite scroll
+- Search on Review Queue: operates on already-fully-loaded instances
+- Sibling jobs (1489 / 1489-N): if one matches search or filter, **always pull in its sibling** too
+- Sibling sort order: NABL job leads (`1489` before `1489-N`). Sort direction applies to the pair position in the list; within the pair, NABL always leads on ascending, -N leads on descending
+- Default sort for both pages: `createdAt` descending (newest on top)
+- Sort by job code: strip `-N` suffix to treat siblings as same root, then sort by numeric root
+- Date filter: `createdAt` range (From / To date inputs); include/exclude toggle applies
+- Transfer Management: collapsed into a **full-width accordion** placed directly below the header. Closed on page load. Toggle bar shows a red filled circle badge with pending transfer count on the right side
+- Review Queue sibling grouping: strip dept+analyst suffix from `testCode` to get root job code, then group sibling roots consecutively
+
+**Files to create:**
+- `frontend/src/components/PageHeader.jsx`
+- `frontend/src/hooks/useListControls.js`
+
+**Files to modify:**
+- `frontend/src/pages/Head/DispatcherPage.jsx`
+- `frontend/src/pages/Head/ReviewQueuePage.jsx`
+- `frontend/src/pages/Head/TransferManagement.jsx`
+
+---
+
+#### SP2.P6 — Subphases
+
+| Subphase | Task |
+|---|---|
+| SP2.P6.1 | **Build `useListControls` hook**: accepts a config object `{ searchFields, sortOptions, filterDefs }`. Returns `{ searchQuery, setSearchQuery, sortKey, sortDir, toggleSortDir, setSortKey, activeFilters, setFilter, clearFilter, clearAll, processedItems }`. `processedItems` = filtered + sorted result derived via `useMemo` from the raw items array passed in |
+| SP2.P6.2 | **Build `<PageHeader>` component**: accepts `{ config, controls, resultCount, totalCount }`. Renders: sticky card with search input (left), Sort button + Filter button (center-right), Clear All button, result count label. Sort and Filter buttons each open/close their own inline dropdown panel. Renders active filter chips row below if any filters are active |
+| SP2.P6.3 | **Filter chip row**: each chip shows filter label + value + red × dismiss button. Chips are large enough for mobile tap (min 36px height). Sibling-aware: a sibling-pull chip appears when siblings are being force-included |
+| SP2.P6.4 | **Sort panel (reusable)**: renders a list of sort key options as radio-style rows, each with an Asc/Desc toggle. Selecting a key switches to it; clicking the active key toggles direction. Closes on outside click |
+| SP2.P6.5 | **Filter panel (reusable)**: renders filter fields from `filterDefs` config. Each filter def specifies type (`toggle`, `select`, `dateRange`). Each has an include/exclude toggle. Closes on outside click. Apply is live (no confirm button needed) |
+| SP2.P6.6 | **Sibling resolution utility** (`utils/siblingUtils.js`): export `resolveSiblings(items, getSiblingId)` — given a filtered array, expands it to include sibling items from the full list if not already present |
+| SP2.P6.7 | **Wire Dispatcher page — search**: integrate Fuse.js search on `jobs`. On search active, fetch all jobs from `/api/jobs?activeForHead=true` (no cursor) once and cache; search over full set. Clear search = return to cursor-based display |
+| SP2.P6.8 | **Wire Dispatcher page — sort**: default `createdAt` desc. Sort by job code strips `-N` suffix, compares numeric root, with NABL leading within each pair. Sort operates on the loaded slice (not the full set) |
+| SP2.P6.9 | **Wire Dispatcher page — filter**: implement four filter options: `Dispatch Locked` (toggle), `Pending Approval` (toggle), `Pending Other Dept Approval` (toggle), `Date Range` (From/To). Each with include/exclude. Apply to loaded slice |
+| SP2.P6.10 | **Dispatcher: Transfer Management accordion**: wrap `<TransferManagement />` in a collapsible accordion bar. Bar is full-width, collapsed by default. Right side of bar shows a red circle badge with `incomingTransfers.length` count (only if > 0). Chevron animates on open/close |
+| SP2.P6.11 | **Wire Review Queue — sort + bug fix**: apply default `createdAt` desc sort (fixes the inconsistency bug vs Dispatcher). Add sort options: job code (sibling-aware, same root logic) and date received. Ascending/descending toggle |
+| SP2.P6.12 | **Wire Review Queue — filter**: analyst selector (populated from dept analysts already in state), date range. Each with include/exclude toggle |
+| SP2.P6.13 | **Wire Review Queue — search**: Fuse.js over `instances`. Search fields: `testCode` (job code), `clientName`, and parameter names from `inst.results[*].name`. Sibling grouping: strip dept+analyst suffix from `testCode` to extract root job code; when a match is found, also include all instances sharing the same root |
+| SP2.P6.14 | **Sticky header scroll behavior**: when any control in the header is interacted with (search/filter/sort change), call `window.scrollTo({ top: 0, behavior: 'smooth' })` so the user is brought back to the top of the results |
+| SP2.P6.15 | **Admin Officer Job Distributor**: add `<PageHeader>` with same infrastructure. Config: sort (date, job code), filter (NABL type, date range, status), search (job code, client name, sample name). This is a separate subphase pass once the component is stable |
+| SP2.P6.16 | **Activity Logs page**: add `<PageHeader>` with config appropriate to audit log fields. Separate subphase pass |
+| SP2.P6.17 | **Mobile verification**: sticky header must not eat too much vertical space on small screens. Filter/sort dropdowns must not overflow viewport. Chips must wrap cleanly. Transfer accordion bar must be full-width and tappable |
+
+---
+
 ### SP2.P9 — F19: Head Monitor Tab V1 — Cancel, Reassign & Live Progress
 
 
@@ -450,6 +510,7 @@ Dispatch ──→ Monitor ──→ Review ─→ Done
 | SP3.P12 | F3 | Transfer List Rework |
 | SP3.P13 | F6 | Job Grouping in Officer's Page |
 | SP3.P14 | F21 | OTP-Based Password Reset |
+| SP3.P15 | F22 | Analyst Selection UI Overhaul (Dispatcher) |
 
 ---
 
@@ -639,6 +700,36 @@ Login screen
 | SP3.P14.8 | **Frontend — Back to login**: Provide a "Back to Login" link at each step so the user is never trapped |
 | SP3.P14.9 | Client-side validation: new password must be at least 8 characters. Confirm password must match. Show inline errors, not toasts, for these |
 | SP3.P14.10 | Verify mobile: each step must fit on one screen without scrolling. OTP input must not trigger autocorrect/autocapitalize. New password field must have `type="password"` with show/hide toggle |
+
+---
+
+### SP3.P15 — F22: Analyst Selection UI Overhaul (Dispatcher)
+
+**Files**: `frontend/src/pages/Head/DispatcherPage.jsx`, possibly a new `frontend/src/components/AnalystPicker.jsx`
+
+**What the problem is**: The current dispatcher dispatch flow shows a plain native `<select>` dropdown per parameter row labelled "Select Analyst...". With 40+ parameters per job, this is visually noisy, repetitive, and error-prone on mobile. The head has to open dozens of individual dropdowns.
+
+**What to build**: Replace the per-row native dropdown with a **chip-style analyst picker**. Each parameter row shows an unassigned state by default. Clicking opens a small floating popover/panel listing available analysts (with their dept badge and current load count). Selecting an analyst stamps a coloured chip on that row. The head can then bulk-assign remaining rows using a "Assign all remaining to:" quick-action bar at the top of the expanded card.
+
+**UI spec:**
+- **Unassigned state**: light grey pill — `+ Assign`
+- **Assigned state**: coloured chip with analyst initials/avatar + name + an `×` to clear
+- **Popover**: shows analyst name, department badge, and how many params they already have in this job (e.g. `"3 assigned"`)
+- **Bulk assign bar**: sticky at top of the expanded dispatch card — analyst picker + "Assign to all unassigned" button. Eliminates the need to click every row individually for simple single-analyst jobs.
+- **Mobile**: popover opens as a bottom sheet instead of a floating panel
+
+**Scope**: Frontend only. The actual dispatch API payload (`{ parameterId, analystId }` per param) stays the same; only the UI for building that mapping changes.
+
+| Subphase | Task |
+|---|---|
+| SP3.P15.1 | Read `DispatcherPage.jsx` dispatch section — map the current state shape for per-param analyst assignment, the list of available analysts fetched, and the submit payload structure |
+| SP3.P15.2 | Build `AnalystPicker.jsx` — a reusable controlled component. Props: `analysts[]`, `value` (selected analyst id or null), `onChange`, `assignedCount` (how many params this analyst already has in this job). Renders the chip (assigned) or `+ Assign` pill (unassigned) |
+| SP3.P15.3 | On click of the chip/pill, open a small popover listing all eligible analysts with their name, dept badge, and `N assigned` count. Selecting one fires `onChange`. Clicking `×` on the chip clears the selection |
+| SP3.P15.4 | On mobile (viewport width < 640px), replace the popover with a bottom sheet (fixed position, slides up from bottom, backdrop overlay) |
+| SP3.P15.5 | Replace each per-row `<select>` in the dispatch param table with `<AnalystPicker />` |
+| SP3.P15.6 | Add a **bulk assign bar** at the top of the expanded dispatch card: an `<AnalystPicker />` in standalone mode + an "Assign all unassigned" button. On click, sets all currently unassigned params to the selected analyst |
+| SP3.P15.7 | Ensure the submit/dispatch button validation still works — it should remain disabled until every param has an analyst assigned (existing logic, just wired to the new state) |
+| SP3.P15.8 | Verify mobile: chips readable at small size, bottom sheet doesn't obscure the param list, bulk assign bar stays accessible |
 
 ---
 
