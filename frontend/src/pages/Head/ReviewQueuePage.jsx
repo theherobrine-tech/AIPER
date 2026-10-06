@@ -535,23 +535,29 @@ export default function ReviewQueue() {
                       </div>
                     )}
 
-                    {/* Testing Period */}
-                    {inst.testingPeriod && inst.testingPeriod.startDate && (
-                      <div
-                        style={{
-                          marginBottom: "1rem",
-                          padding: "0.75rem",
-                          backgroundColor: "var(--color-surface-hover)",
-                          borderRadius: "var(--radius-md)",
-                          fontSize: "0.85rem",
-                        }}
-                      >
-                        <strong>Testing Period:</strong>{" "}
-                        {formatDate(inst.testingPeriod.startDate)}{" "}
-                        to{" "}
-                        {formatDate(inst.testingPeriod.endDate)}
+                    {/* Testing Period & Date Received */}
+                    <div
+                      style={{
+                        margin: "1.25rem 0",
+                        padding: "0 0.25rem",
+                        fontSize: "0.85rem",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <div>
+                        {inst.testingPeriod && inst.testingPeriod.startDate && (
+                          <>
+                            <strong>Testing Period:</strong>{" "}
+                            {formatDate(inst.testingPeriod.startDate)} to {formatDate(inst.testingPeriod.endDate)}
+                          </>
+                        )}
                       </div>
-                    )}
+                      <div>
+                        <strong>Date Received:</strong> {formatDate(inst.createdAt)}
+                      </div>
+                    </div>
 
                     {/* Reassign mode info banner */}
                     {isReassignMode && (

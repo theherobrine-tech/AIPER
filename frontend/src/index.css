@@ -1121,6 +1121,33 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   color: white;
 }
 
+/* Active filters collapse animation */
+.active-filters-wrapper {
+  display: grid;
+  grid-template-rows: 0fr;
+  /* Collapse (closing): fade opacity first, then collapse height/margin */
+  transition: opacity 0.15s ease-out, 
+              grid-template-rows 0.3s cubic-bezier(0.4, 0, 0.2, 1) 0.15s, 
+              margin-top 0.3s cubic-bezier(0.4, 0, 0.2, 1) 0.15s;
+  opacity: 0;
+  margin-top: 0;
+}
+.active-filters-wrapper.expanded {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  margin-top: 0.75rem;
+  /* Expand (opening): expand height/margin first, then fade opacity */
+  transition: grid-template-rows 0.3s cubic-bezier(0.4, 0, 0.2, 1), 
+              margin-top 0.3s cubic-bezier(0.4, 0, 0.2, 1), 
+              opacity 0.2s ease-out 0.1s;
+}
+.active-filters-inner {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
 @keyframes slideDown {
   from { opacity: 0; transform: translateY(-6px); }
   to   { opacity: 1; transform: translateY(0); }

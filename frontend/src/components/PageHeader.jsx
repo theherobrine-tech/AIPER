@@ -7,9 +7,21 @@ export default function PageHeader({ config, controls, resultCount, totalCount, 
   
   const [activePanel, setActivePanel] = useState(null); // 'sort' | 'filter' | null
   const panelRef = useRef(null);
-
+  
   const { sortOptions = [], filterDefs = [] } = config;
   const { sortKey, sortDir, setSortKey, toggleSortDir, activeFilters, setFilter, clearFilter, clearAll, isFiltered } = controls;
+
+  const [renderedFilters, setRenderedFilters] = useState(activeFilters);
+  useEffect(() => {
+    if (Object.keys(activeFilters).length === 0 && Object.keys(renderedFilters).length > 0) {
+      const timer = setTimeout(() => {
+        setRenderedFilters({});
+      }, 300);
+      return () => clearTimeout(timer);
+    } else if (Object.keys(activeFilters).length > 0) {
+      setRenderedFilters(activeFilters);
+    }
+  }, [activeFilters]);
 
   useEffect(() => {
     setLocalQuery(controls.searchQuery);
@@ -64,16 +76,6 @@ export default function PageHeader({ config, controls, resultCount, totalCount, 
 
         {/* Controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', position: 'relative' }} ref={panelRef}>
-          {isFiltered && (
-            <button 
-              onClick={clearAll} 
-              className="btn btn-secondary" 
-              style={{ fontSize: '0.8rem', padding: '0.4rem 0.75rem', border: 'none', color: 'var(--color-danger)' }}
-            >
-              Clear All
-            </button>
-          )}
-
           <button
             onClick={() => togglePanel('sort')}
             className="btn btn-secondary"
@@ -87,13 +89,18 @@ export default function PageHeader({ config, controls, resultCount, totalCount, 
           <button
             onClick={() => togglePanel('filter')}
             className="btn btn-secondary"
-            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.4rem 0.75rem', borderColor: Object.keys(activeFilters).length > 0 ? 'var(--color-primary)' : 'var(--color-border)' }}
+            style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '0.4rem', 
+              padding: '0.4rem 0.75rem', 
+              borderColor: Object.keys(activeFilters).length > 0 ? 'var(--color-primary)' : 'var(--color-border)',
+              color: Object.keys(activeFilters).length > 0 ? 'white' : 'inherit',
+              backgroundColor: Object.keys(activeFilters).length > 0 ? 'var(--color-primary)' : 'transparent'
+            }}
           >
             <Filter size={16} />
             Filter
-            {Object.keys(activeFilters).length > 0 && (
-              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--color-primary)' }}></span>
-            )}
             <ChevronDown size={14} />
           </button>
 
@@ -169,14 +176,28 @@ export default function PageHeader({ config, controls, resultCount, totalCount, 
                       ) : (
                         <div className="mode-toggle">
                           <button
-                            className={current.mode === 'include' ? 'active' : ''}
-                            onClick={() => setFilter(def.id, current.value || '', 'include')}
+                            className={isActive && current.mode === 'include' ? 'active' : ''}
+                            onClick={() => {
+                              if (current.value) {
+                                setFilter(def.id, current.value, 'include');
+                              } else if (def.type === 'select' && def.hideAnyOption) {
+                                const opts = filterSelectOptions[def.id] || def.options || [];
+                                if (opts.length > 0) setFilter(def.id, opts[0].value, 'include');
+                              }
+                            }}
                           >
                             Include
                           </button>
                           <button
-                            className={current.mode === 'exclude' ? 'active' : ''}
-                            onClick={() => setFilter(def.id, current.value || '', 'exclude')}
+                            className={isActive && current.mode === 'exclude' ? 'active' : ''}
+                            onClick={() => {
+                              if (current.value) {
+                                setFilter(def.id, current.value, 'exclude');
+                              } else if (def.type === 'select' && def.hideAnyOption) {
+                                const opts = filterSelectOptions[def.id] || def.options || [];
+                                if (opts.length > 0) setFilter(def.id, opts[0].value, 'exclude');
+                              }
+                            }}
                           >
                             Exclude
                           </button>
@@ -233,37 +254,56 @@ export default function PageHeader({ config, controls, resultCount, totalCount, 
         </div>
       </div>
 
-      {isFiltered && (
-        <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span>Showing {resultCount} of {totalCount} items</span>
-        </div>
-      )}
+      <div className={`active-filters-wrapper ${isFiltered ? 'expanded' : ''}`}>
+        <div className="active-filters-inner">
+          <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span>Showing {resultCount} of {totalCount} items</span>
+          </div>
 
-      {Object.keys(activeFilters).length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', paddingTop: '0.25rem' }}>
-          {Object.entries(activeFilters).map(([filterId, state]) => {
-            const def = filterDefs.find(d => d.id === filterId);
-            if (!def) return null;
-            let valLabel = '';
-            if (def.type === 'select') {
-              const opts = filterSelectOptions[def.id] || def.options || [];
-              const found = opts.find(o => String(o.value) === String(state.value));
-              valLabel = found ? found.label : state.value;
-            } else if (def.type === 'dateRange') {
-              valLabel = `${state.value.from || '...'} to ${state.value.to || '...'}`;
-            }
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', paddingTop: '0.25rem' }}>
+              {Object.entries(renderedFilters).map(([filterId, state]) => {
+                const def = filterDefs.find(d => d.id === filterId);
+                if (!def) return null;
+                let valLabel = '';
+                if (def.type === 'select') {
+                  const opts = filterSelectOptions[def.id] || def.options || [];
+                  const found = opts.find(o => String(o.value) === String(state.value));
+                  valLabel = found ? found.label : state.value;
+                } else if (def.type === 'dateRange') {
+                  valLabel = `${state.value.from || '...'} to ${state.value.to || '...'}`;
+                }
 
-            return (
-              <div key={filterId} className="filter-chip">
-                <span>{def.label}{valLabel ? `: ${valLabel}` : ''} ({state.mode})</span>
-                <button onClick={() => clearFilter(filterId)}>
-                  <X size={14} />
+                return (
+                  <div key={filterId} className="filter-chip">
+                    <span>{def.label}{valLabel ? `: ${valLabel}` : ''} ({state.mode})</span>
+                    <button onClick={() => clearFilter(filterId)}>
+                      <X size={14} />
+                    </button>
+                  </div>
+                );
+              })}
+              
+              {Object.keys(renderedFilters).length > 0 && (
+                <button 
+                  onClick={clearAll} 
+                  style={{ 
+                    fontSize: '0.82rem', 
+                    padding: '0.3rem 0.75rem', 
+                    border: 'none', 
+                    background: 'transparent',
+                    color: 'var(--color-danger)',
+                    cursor: 'pointer',
+                    fontWeight: 500,
+                    display: 'flex',
+                    alignItems: 'center'
+                  }}
+                >
+                  Clear All
                 </button>
-              </div>
-            );
-          })}
+              )}
+            </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
