@@ -121,21 +121,7 @@ export default function ReviewQueue() {
     };
   }, [socket]);
 
-  // Fetch all instances on first search activation
-  useEffect(() => {
-    if (reviewControls?.searchQuery && !allInstancesLoaded && !isLoadingAllInstances) {
-      setIsLoadingAllInstances(true);
-      axios.get(`${API_URL}/api/tests/instances?limit=1000`)
-        .then((res) => {
-          const list = (res.data.instances || res.data).filter((i) => i.status === "PENDING_HEAD_REVIEW");
-          setAllInstances(list);
-          setAllInstancesLoaded(true);
-        })
-        .catch(console.error)
-        .finally(() => setIsLoadingAllInstances(false));
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reviewControls?.searchQuery]);
+
 
   const handleApprove = async (id) => {
     setSubmittingReviewId(id);
@@ -276,6 +262,7 @@ export default function ReviewQueue() {
       id: 'analyst',
       label: 'Analyst',
       type: 'select',
+      hideAnyOption: true,
       test: (inst, value) => {
         const analystId = inst.assignedTo?._id || inst.assignedTo;
         return String(analystId) === String(value);
@@ -337,6 +324,22 @@ export default function ReviewQueue() {
     setInstancesPage(1);
   }, [reviewControls.searchQuery, reviewControls.sortKey, reviewControls.sortDir, reviewControls.activeFilters]);
 
+  // Fetch full instance list on first search activation (for Fuse)
+  useEffect(() => {
+    if (reviewControls.searchQuery && !allInstancesLoaded && !isLoadingAllInstances) {
+      setIsLoadingAllInstances(true);
+      axios.get(`${API_URL}/api/tests/instances?limit=1000`)
+        .then((res) => {
+          const list = (res.data.instances || res.data).filter((i) => i.status === "PENDING_HEAD_REVIEW");
+          setAllInstances(list);
+          setAllInstancesLoaded(true);
+        })
+        .catch(console.error)
+        .finally(() => setIsLoadingAllInstances(false));
+    }
+  }, [reviewControls.searchQuery]); // eslint-disable-line react-hooks/exhaustive-deps
+
+
   return (
     <div>
       <h1
@@ -374,6 +377,17 @@ export default function ReviewQueue() {
         </div>
       )}
 
+      <PageHeader
+        config={reviewSortConfig}
+        controls={reviewControls}
+        onSearchChange={reviewControls.setSearchQuery}
+        resultCount={reviewControls.processedItems.length}
+        totalCount={instances.length}
+        filterSelectOptions={{
+          analyst: assistants.map((a) => ({ value: a._id, label: a.name }))
+        }}
+      />
+
       {reviewLoading && instances.length === 0 ? (
         <div className="card">
           <Spinner message="Loading review queue..." />
@@ -393,17 +407,6 @@ export default function ReviewQueue() {
         <div
           style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}
         >
-          <PageHeader
-            config={reviewSortConfig}
-            controls={reviewControls}
-            onSearchChange={reviewControls.setSearchQuery}
-            resultCount={reviewControls.processedItems.length}
-            totalCount={instances.length}
-            filterSelectOptions={{
-              analyst: assistants.map((a) => ({ value: a._id, label: a.name }))
-            }}
-          />
-
           {visibleInstances.map((inst) => {
             const isReassignMode = showReassignForm === inst._id;
 

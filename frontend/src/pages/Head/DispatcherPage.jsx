@@ -121,7 +121,7 @@ export default function Dispatcher() {
     },
     {
       id: 'pendingOtherDept',
-      label: 'Pending Other Dept',
+      label: 'Approved',
       type: 'toggle',
       test: (job) => {
         const myDept = user?.department?.toLowerCase();
@@ -514,15 +514,14 @@ export default function Dispatcher() {
       <TransferManagement />
 
       {/* ── Page Header (search / sort / filter) ── */}
-      {!dispatchLoading && jobs.length > 0 && (
-        <PageHeader
-          config={dispatcherSortConfig}
-          controls={dispatcherControls}
-          onSearchChange={dispatcherControls.setSearchQuery}
-          resultCount={dispatcherControls.processedItems.length}
-          totalCount={jobs.length}
-        />
-      )}
+      <PageHeader
+        config={dispatcherSortConfig}
+        controls={dispatcherControls}
+        onSearchChange={dispatcherControls.setSearchQuery}
+        resultCount={dispatcherControls.processedItems.length}
+        totalCount={jobs.length}
+      />
+
 
       {dispatchLoading && jobs.length === 0 ? (
         <div className="card"><Spinner message="Loading pending jobs..." /></div>

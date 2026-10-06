@@ -136,41 +136,50 @@ export default function PageHeader({ config, controls, resultCount, totalCount, 
             <div className="list-controls-panel">
               <h4 style={{ margin: '0 0 1rem 0', fontSize: '0.9rem', color: 'var(--color-text-muted)' }}>Filters</h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                {filterDefs.map(def => {
+                {filterDefs.map((def, index) => {
                   const current = activeFilters[def.id] || { value: '', mode: 'include' };
                   const isActive = !!activeFilters[def.id];
+                  const isLast = index === filterDefs.length - 1;
 
                   return (
-                    <div key={def.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', borderBottom: '1px solid var(--color-border)', paddingBottom: '0.75rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>{def.label}</span>
+                    <div key={def.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', borderBottom: isLast ? 'none' : '1px solid var(--color-border)', paddingBottom: isLast ? '0' : '0.75rem' }}>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>{def.label}</span>
+                      
+                      {def.type === 'toggle' ? (
                         <div className="mode-toggle">
-                          <button 
-                            className={current.mode === 'include' ? 'active' : ''}
-                            onClick={() => setFilter(def.id, current.value || (def.type === 'toggle' ? true : ''), 'include')}
+                          <button
+                            className={isActive && current.mode === 'include' ? 'active' : ''}
+                            onClick={() => {
+                              if (isActive && current.mode === 'include') clearFilter(def.id);
+                              else setFilter(def.id, true, 'include');
+                            }}
                           >
                             Include
                           </button>
-                          <button 
-                            className={current.mode === 'exclude' ? 'active' : ''}
-                            onClick={() => setFilter(def.id, current.value || (def.type === 'toggle' ? true : ''), 'exclude')}
+                          <button
+                            className={isActive && current.mode === 'exclude' ? 'active' : ''}
+                            onClick={() => {
+                              if (isActive && current.mode === 'exclude') clearFilter(def.id);
+                              else setFilter(def.id, true, 'exclude');
+                            }}
                           >
                             Exclude
                           </button>
                         </div>
-                      </div>
-
-                      {def.type === 'toggle' && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <input 
-                            type="checkbox" 
-                            checked={isActive}
-                            onChange={(e) => {
-                              if (e.target.checked) setFilter(def.id, true, current.mode);
-                              else clearFilter(def.id);
-                            }}
-                          />
-                          <span style={{ fontSize: '0.85rem' }}>Enabled</span>
+                      ) : (
+                        <div className="mode-toggle">
+                          <button
+                            className={current.mode === 'include' ? 'active' : ''}
+                            onClick={() => setFilter(def.id, current.value || '', 'include')}
+                          >
+                            Include
+                          </button>
+                          <button
+                            className={current.mode === 'exclude' ? 'active' : ''}
+                            onClick={() => setFilter(def.id, current.value || '', 'exclude')}
+                          >
+                            Exclude
+                          </button>
                         </div>
                       )}
 
@@ -183,7 +192,7 @@ export default function PageHeader({ config, controls, resultCount, totalCount, 
                           }}
                           style={{ padding: '0.4rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)', fontSize: '0.85rem', width: '100%' }}
                         >
-                          <option value="">Any</option>
+                          {!def.hideAnyOption && <option value="">Any</option>}
                           {(filterSelectOptions[def.id] || def.options || []).map(opt => (
                             <option key={opt.value} value={opt.value}>{opt.label}</option>
                           ))}
