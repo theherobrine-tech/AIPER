@@ -244,7 +244,7 @@ Dependencies within SP1 dictate this sequence:
 | SP2.P3 | F8 | Toast System Overhaul | ⬜ Upcoming |
 | SP2.P4 | F15 | Global Modal Daemon | ⬜ Upcoming |
 | SP2.P5 | F13 | Analyst Reassignment History Tracking | ✅ Done |
-| SP2.P6 | F2 | Head Pages — Search, Filter & Sort | ⬜ Upcoming |
+| SP2.P6 | F2 | Head Pages, Search, Filter & Sort | ✅ Done |
 | SP2.P7 | F16 | Hide Test Code Suffixes in UI | ⬜ Upcoming |
 | SP2.P8 | F18 | Error Handling & Modal Overhaul | ⬜ Upcoming |
 | SP2.P9 | F19 | Head Monitor Tab V1 — Cancel, Reassign & Live Progress | ⬜ Upcoming |
@@ -422,6 +422,17 @@ Full flow tested: Om Prakash had 5 params. HEAD selective-reassigned 2 → Visha
 | SP2.P6.15 | **Admin Officer Job Distributor**: add `<PageHeader>` with same infrastructure. Config: sort (date, job code), filter (NABL type, date range, status), search (job code, client name, sample name). This is a separate subphase pass once the component is stable |
 | SP2.P6.16 | **Activity Logs page**: add `<PageHeader>` with config appropriate to audit log fields. Separate subphase pass |
 | SP2.P6.17 | **Mobile verification**: sticky header must not eat too much vertical space on small screens. Filter/sort dropdowns must not overflow viewport. Chips must wrap cleanly. Transfer accordion bar must be full-width and tappable |
+
+> ✅ **COMPLETE**. All infrastructure built and wired to Dispatcher and Review Queue pages. 
+> - `useListControls` and `PageHeader` created with sticky scroll, live search, and dynamic filter/sort.
+> - Sibling resolution implemented (`utils/siblingUtils.js`) for accurate job filtering.
+> - Transfer Management converted into a full-width accordion on the Dispatcher page.
+> - UI polished with delayed unmount animations to prevent height snapping on filter clear.
+> - Mobile verification passed with clean chip wrapping and non-obstructive dropdowns.
+> 
+> *Note: Admin Officer Job Distributor (SP2.P6.15) and Activity Logs (SP2.P6.16) will receive the PageHeader as part of their respective dedicated phases.*
+> 
+> Files changed: `frontend/src/hooks/useListControls.js`, `frontend/src/components/PageHeader.jsx`, `frontend/src/utils/siblingUtils.js`, `frontend/src/pages/Head/DispatcherPage.jsx`, `frontend/src/pages/Head/ReviewQueuePage.jsx`, `frontend/src/pages/Head/TransferManagement.jsx`, `frontend/src/index.css`
 
 ---
 
